@@ -2,86 +2,147 @@
 
 ## Summary
 
-An e-commerce site where the user picks a product, and an autonomous agent
-does the work of finding the cheapest total cost (product + shipping) across
-multiple retailers and shipping carriers. The user simply states the max
-price they're willing to pay and the date they need it by — the agent
-handles pricing, arbitrage, and (when authorized) the actual purchase.
+A marketplace where the user picks a product and pays a simple, reasonable
+price — no typing in a max price. Behind the scenes, an autonomous agent
+finds the cheapest total cost (product + shipping) across simulated
+retailers and carriers, buys accordingly, and pockets the difference as
+margin. Over time, multiple agents can compete against each other for
+prize/reward incentives, with some rewards settled on Monad.
 
-## User Flow
+This is split into **two separate surfaces**:
 
-1. **User searches for a product** on the site (e.g., "Sony WH-1000XM5
-   headphones").
-2. **User sets constraints**:
-   - Maximum price they're willing to pay (total, or product-only).
-   - Desired/required delivery date.
-3. **Agent searches across retailers** (Amazon, Temu, Walmart, Target, etc.)
-   for the same or equivalent product and pulls current pricing.
-4. **Agent checks shipping options** across carriers (UPS, FedEx, USPS,
-   retailer-native shipping) for cost and delivery speed to the user's
-   address.
-5. **Agent computes total landed cost** = product price + shipping price for
-   every retailer × carrier combination, filtered by the user's delivery
-   date requirement.
-6. **Agent selects the cheapest valid option** that meets the delivery
-   deadline and is within the user's max price.
-7. **Agent executes the purchase** on the user's behalf (retail transaction),
-   using Rain-issued virtual/scoped cards funded via stablecoins.
-8. **User is notified** of what was purchased, from where, total cost, and
-   expected delivery date.
+1. **Retailer Dashboard (internal/admin)** — a mocked, minimal dashboard that
+   mimics retailer pricing (Amazon, Temu, Walmart, etc.) and shipping costs
+   (UPS, FedEx, USPS) per product. This is simulated/seeded data, not live
+   scraping — used as the data source the agent shops against.
+2. **Client Marketplace UI (public-facing)** — a simple storefront where end
+   users just see a product and a single reasonable price. No price input,
+   no retailer/shipping detail — the agent has already done that work.
+
+## User Flow (Client Marketplace)
+
+1. User browses the marketplace and picks a product.
+2. UI shows a single, simple, reasonable price (computed by the agent from
+   the dashboard data) and an estimated delivery date.
+3. User checks out. No manual price entry.
+4. **Quantity mismatch edge case**: if the cheapest matching listing is a
+   multi-pack (e.g., a 4-pack of toothpaste) but the user only wants 1, the
+   agent prompts the user: "The best price we found is for a 4-pack at $X
+   total — would you like to buy the pack instead of a single unit?" User
+   accepts or declines before checkout proceeds.
+5. Agent executes the purchase (simulated retail transaction) using a
+   Rain-issued scoped card, and the order is confirmed to the user.
+
+## Retailer Dashboard (Internal)
+
+- Minimal, clean UI — a table/grid per product showing:
+  - Retailer name (Amazon, Temu, Walmart, etc. — simulated)
+  - Product price at that retailer
+  - Available pack/quantity sizes
+  - Shipping cost + estimated delivery date per carrier (UPS, FedEx, USPS)
+  - Computed total landed cost per retailer × carrier combination
+- This is the agent's "market data" — swappable later for real APIs, but for
+  the hackathon it's mocked/seeded so the whole flow works end-to-end.
+- Acts as the control panel to see *why* the agent picked what it picked.
+
+## Agent Logic
+
+1. Look up the requested product across the mocked retailer dataset.
+2. For each retailer, get price + available quantities/pack sizes.
+3. For each shipping carrier, get shipping cost + delivery estimate.
+4. Compute total landed cost per retailer × carrier combination.
+5. **Quantity check**: if the cheapest option's quantity exceeds what the
+   user needs, pause and ask the user if they're willing to pay for the
+   larger pack (don't silently auto-buy extra).
+6. Pick the cheapest valid combination that meets any delivery constraints.
+7. Set the client-facing price with the agent's margin baked in (agent buys
+   low, marketplace sells at a small markup — this is how the agent makes
+   money).
+8. Execute the purchase via Rain, confirm to the user.
+
+## Multi-Agent Competition (Future Phase)
+
+- Multiple agents can independently shop the same retailer dashboard data
+  and compete to find the best price/margin for a given product or order.
+- A scoring mechanism determines a "winner" per round/product (e.g., best
+  margin, fastest fulfillment, or best price found).
+- Winning agent(s) receive a reward — some rewards distributed/tracked on
+  Monad (e.g., an on-chain reward pool or token payout per win).
+- This phase is explicitly **future work**, not part of the initial hackathon
+  build — the MVP is a single-agent flow.
 
 ## How Rain Fits In
 
-- **Scoped virtual cards**: Issue a single-use or spend-capped virtual card
-  per purchase so the agent can only spend up to the user's stated max
-  price — no ability to overspend.
-- **Stablecoin funding**: User's wallet balance (in stablecoins) funds the
-  card in real time, avoiding pre-funding a traditional bank account.
-- **Webhooks**: Get real-time confirmation when a transaction is
-  authorized/settled, so the agent (and user) know the purchase succeeded.
-- **Wallet infrastructure**: Give each user (or each agent session) a
-  branded embedded wallet with built-in compliance (KYC/AML) for handling
-  funds.
+- **Scoped virtual cards**: Issue a spend-capped virtual card per purchase
+  so the agent can only spend up to the computed landed cost.
+- **Stablecoin funding**: Agent's operating wallet (stablecoins) funds each
+  card in real time.
+- **Webhooks**: Real-time confirmation when a transaction is
+  authorized/settled.
+- **Wallet infrastructure**: Branded embedded wallet for the agent's
+  operating funds, with built-in KYC/AML compliance.
+- **Margin capture**: The spread between what the agent pays (landed cost)
+  and what the user pays (marketplace price) is the agent's profit.
 
 ## How Monad Fits In
 
-- **On-chain agent logic**: Run the arbitrage/decision logic (or a verifiable
-  record of it) as a smart contract or on-chain agent so purchase decisions
-  are transparent and auditable.
-- **Fast settlement**: Monad's high throughput and sub-second finality let
-  the agent react quickly to price/shipping data before it changes, and
-  settle any on-chain fund movements (e.g., moving stablecoins into the
-  Rain-funded wallet) almost instantly.
-- **Spend policy contracts**: Encode the user's max price / delivery date
-  constraints as an on-chain policy that must be satisfied before funds are
-  released to fund a Rain card.
-- **Auditable transaction trail**: Every arbitrage decision (chosen retailer,
-  chosen carrier, price comparison data) can be hashed/logged on Monad for
-  transparency and dispute resolution.
+- **Reward pool / prize contract**: For the future multi-agent competition,
+  a Monad smart contract can hold and distribute rewards to winning agents.
+- **Fast settlement**: Sub-second finality lets agents react quickly and
+  settle any on-chain fund movements almost instantly.
+- **Spend policy contracts**: Encode constraints (e.g., max spend per
+  purchase) as an on-chain policy before releasing funds to a Rain card.
+- **Auditable transaction trail**: Log each agent's chosen retailer/carrier
+  and computed margin on-chain for transparency, and (later) for scoring
+  which agent performed best.
 
 ## Core Components
 
-- **Price Aggregator**: Scrapes/queries retailer APIs (Amazon, Temu, Walmart,
-  etc.) for current product pricing and availability.
-- **Shipping Rate Engine**: Queries carrier APIs (UPS, FedEx, USPS) for rates
-  and delivery estimates to the user's address.
+- **Retailer Dashboard (internal)**: Seeded/mocked pricing + shipping data
+  UI, grouped by product.
+- **Client Marketplace UI (public)**: Simple storefront — product, image,
+  single price, delivery estimate, checkout. No manual price/carrier input.
 - **Arbitrage Engine**: Combines product price + shipping price per
-  retailer/carrier pair, filters by delivery deadline, and ranks by total
-  cost.
-- **Spend Authorization Layer**: Monad smart contract / policy engine that
-  approves fund release only if the total cost is within the user's stated
-  max price.
+  retailer/carrier pair, handles quantity-mismatch prompts, and picks the
+  cheapest valid option.
+- **Pricing/Margin Layer**: Converts landed cost into the client-facing
+  marketplace price (landed cost + agent margin).
+- **Spend Authorization Layer**: Monad policy/contract that approves fund
+  release within agreed limits.
 - **Payment Executor**: Uses Rain's API to issue a scoped card and execute
-  the retail transaction.
+  the (simulated) retail transaction.
 - **Notification Layer**: Confirms purchase details back to the user
-  (webhooks from Rain + on-chain event from Monad).
+  (Rain webhooks + on-chain events from Monad).
+- **(Future) Competition/Reward Layer**: Multi-agent scoring + Monad-based
+  reward distribution.
+
+## Deployment Plan (Vercel)
+
+Since this needs to be demo-able for a hackathon and deployed on Vercel:
+
+- Two separate Next.js apps/routes (or one monorepo with two apps):
+  - `dashboard` — internal retailer/shipping mock data view.
+  - `marketplace` — public client-facing storefront.
+- Mocked retailer/shipping data can live in a simple JSON/seed file or a
+  lightweight hosted DB (e.g., Vercel Postgres or KV) — no live scraping,
+  so no server-side scraping infra needed, which keeps it Vercel-friendly
+  (serverless functions only).
+- Rain and Monad calls (API keys, RPC calls) go through Vercel serverless
+  functions / API routes — keep keys server-side, never exposed to the
+  client bundle.
+- Environment variables (Rain API key, Monad RPC URL, etc.) managed via
+  Vercel project settings, not committed to the repo.
+- Keep the initial MVP to a single agent + single product flow so it demos
+  cleanly; multi-agent competition and Monad reward pool are stretch goals.
 
 ## Open Questions / Next Steps
 
-- Which retailers have public/partner APIs vs. require scraping?
-- Do we need explicit user approval per-purchase, or is a pre-authorized
-  max price enough for the agent to buy autonomously?
-- How do we handle returns/refunds through Rain if the agent picks a bad
-  vendor?
-- What's the MVP scope — single retailer + single carrier comparison first,
-  then expand?
+- What's the seed dataset for mocked retailer prices/shipping — how many
+  products/retailers/carriers do we need for a convincing demo?
+- Should quantity-mismatch prompt block checkout until answered, or offer a
+  "just buy the single-unit price, no savings" fallback?
+- How much margin should the agent take by default (fixed % vs. dynamic)?
+- What does a minimal Monad reward-pool contract look like for the future
+  multi-agent phase (even if not built for the hackathon)?
+- Do we need user auth for the marketplace, or is it anonymous checkout for
+  the demo?

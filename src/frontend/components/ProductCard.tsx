@@ -48,7 +48,12 @@ export function ProductCard({ product }: ProductCardProps) {
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 p-5 shadow-sm dark:border-zinc-800">
-      <div className="aspect-square w-full rounded-xl bg-zinc-100 dark:bg-zinc-900" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={product.imageUrl}
+        alt={product.name}
+        className="aspect-square w-full rounded-xl bg-zinc-100 object-cover dark:bg-zinc-900"
+      />
       <h3 className="text-base font-semibold">{product.name}</h3>
 
       {price === null ? (

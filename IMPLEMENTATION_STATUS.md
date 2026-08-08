@@ -23,8 +23,11 @@ authorize → settle transaction against it.
 - If those env vars are **not** set, checkout automatically falls back to a
   simulated `orderId` (`sim-<timestamp>`) so the frontend keeps working for
   anyone without Rain credentials configured.
-- `src/backend/monad/client.ts` is still a stub — `checkSpendPolicy` throws
-  "not implemented yet" and nothing calls it yet.
+- `src/backend/monad/client.ts` now makes **real read-only JSON-RPC calls**
+  to Monad testnet (`eth_chainId`, `eth_blockNumber`, `eth_gasPrice`) — no
+  private key/signer is configured, so nothing is broadcast on-chain yet.
+  `checkSpendPolicy` gates every checkout on a live Monad testnet
+  reachability check before a Rain card is issued.
 
 **In short: the UI, pricing logic, and quantity-mismatch flow are fully
 wired up end-to-end, and checkout now performs a real Rain sandbox
@@ -56,8 +59,18 @@ fallback when they're not.**
 - ✅ Real Rain sandbox integration (`src/backend/rain/client.ts`, ported
   from `rain_demo.py`): session-id generation (RSA-OAEP/SHA-1 encrypted),
   scoped card issuance, and authorize + settle transaction execution.
-- ❌ Not implemented: real Monad spend-policy checks, real retailer/shipping
-  APIs, user accounts/auth, multi-agent competition, reward payouts.
+- ✅ Real Monad testnet integration (`src/backend/monad/client.ts`): live
+  `eth_chainId`/`eth_blockNumber`/`eth_gasPrice` JSON-RPC calls gate every
+  checkout via `checkSpendPolicy`, and real network status (chain id,
+  latest block, gas price, USDC test contract) is shown on `/dev`.
+- ✅ Developer dashboard (`/dev`): live API call log (every Rain + Monad
+  call, with success/failure, latency, and summaries), aggregate
+  success-rate/latency stats, Rain + Monad status panels, and the same
+  pricing/shipping table as `/dashboard`.
+- ❌ Not implemented: on-chain spend-limit *enforcement* (currently just a
+  liveness check, not a real spend-policy contract), real retailer/shipping
+  APIs, user accounts/auth, multi-agent competition, reward payouts
+  (`distributeReward` needs a funded Monad signer, which isn't set up).
 
 ## What happens when you click "Buy now"
 
@@ -105,8 +118,11 @@ stock photos later by updating `imageUrl` in `src/backend/data/mockData.ts`.
 
 1. ~~Add your Rain API key, user ID, and contract ID to `.env`~~ — done;
    Rain purchases in `/api/checkout` are now live against the sandbox.
-2. Implement `checkSpendPolicy` in `src/backend/monad/client.ts` if you want
-   on-chain spend-limit enforcement before a purchase goes through.
+2. ~~Implement `checkSpendPolicy` in `src/backend/monad/client.ts`~~ — done;
+   it now performs a real Monad testnet liveness check before every
+   checkout. Next: replace the liveness check with a real on-chain
+   spend-policy contract call once one exists, and add a funded signer to
+   enable `distributeReward` for the future multi-agent phase.
 3. Replace the mocked retailer/shipping data with real pricing sources once
    you have them.
 4. Decide on production error-handling for Rain failures (currently any

@@ -23,6 +23,18 @@ interface DevMetrics {
   rainConfigured: boolean;
   stats: CallLogStats;
   calls: ApiCallLogEntry[];
+  monad: {
+    config: { rpcUrl: string; chainId: string; usdcContract: string };
+    status:
+      | {
+          chainId: number;
+          latestBlock: number;
+          gasPriceWei: string;
+          usdcContract: string;
+          reachable: true;
+        }
+      | { reachable: false; error: string };
+  };
 }
 
 const REFRESH_MS = 4000;
@@ -92,8 +104,9 @@ export function DevDashboard() {
         </label>
       </div>
       <p className="mb-8 text-zinc-500">
-        Behind-the-scenes engineering view: every outbound API call, success/failure
-        rates, and per-product pricing/shipping data. Not visible from the marketplace.
+        Behind-the-scenes engineering view: every outbound API call (Rain sandbox +
+        Monad testnet RPC), success/failure rates, and per-product pricing/shipping
+        data. Not visible from the marketplace.
       </p>
 
       {/* Rain integration status */}
@@ -109,6 +122,55 @@ export function DevDashboard() {
           : metrics.rainConfigured
             ? "Rain sandbox credentials detected — checkout is making real Rain API calls."
             : "No Rain credentials found — checkout is running in simulated mode (set RAIN_API_KEY / RAIN_USER_ID / RAIN_CONTRACT_ID)."}
+      </div>
+
+      {/* Monad network status */}
+      <div className="mb-8 rounded-xl border border-zinc-200 px-4 py-4 text-sm dark:border-zinc-800">
+        <div className="mb-3 flex items-center gap-2">
+          <span
+            className={
+              "inline-block h-2.5 w-2.5 rounded-full " +
+              (metrics?.monad.status.reachable ? "bg-emerald-500" : "bg-red-500")
+            }
+          />
+          <span className="font-medium">Monad testnet</span>
+          {metrics && (
+            <span className="text-zinc-500">
+              {metrics.monad.status.reachable
+                ? "reachable — used to gate purchases via checkSpendPolicy before releasing funds."
+                : `unreachable — ${"error" in metrics.monad.status ? metrics.monad.status.error : "purchases are blocked"}`}
+            </span>
+          )}
+        </div>
+        {metrics?.monad.status.reachable && (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500">Chain ID</div>
+              <div className="mt-0.5 font-mono">{metrics.monad.status.chainId}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500">Latest Block</div>
+              <div className="mt-0.5 font-mono">
+                {metrics.monad.status.latestBlock.toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500">Gas Price</div>
+              <div className="mt-0.5 font-mono">
+                {(Number(metrics.monad.status.gasPriceWei) / 1e9).toFixed(2)} gwei
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500">USDC Contract</div>
+              <div className="mt-0.5 truncate font-mono text-xs" title={metrics.monad.status.usdcContract}>
+                {metrics.monad.status.usdcContract}
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="mt-3 text-xs text-zinc-400">
+          RPC: {metrics?.monad.config.rpcUrl ?? "…"}
+        </div>
       </div>
 
       {/* Aggregate stats */}
@@ -156,7 +218,16 @@ export function DevDashboard() {
                   {new Date(call.timestamp).toLocaleTimeString()}
                 </td>
                 <td className="px-4 py-2">
-                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium dark:bg-zinc-800">
+                  <span
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (call.source === "monad"
+                        ? "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+                        : call.source === "rain"
+                          ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300")
+                    }
+                  >
                     {call.source}
                   </span>
                 </td>

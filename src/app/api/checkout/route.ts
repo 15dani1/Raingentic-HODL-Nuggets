@@ -22,6 +22,7 @@ import {
   getCheapestSingleUnitQuote,
 } from "@/backend/services/arbitrageEngine";
 import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
+import { checkSpendPolicy } from "@/backend/monad/client";
 import { recordApiCall } from "@/backend/services/callLog";
 import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
 
@@ -108,7 +109,13 @@ export async function POST(req: NextRequest) {
 
   const startedAt = Date.now();
   try {
-    // TODO(backend): gate this with Monad checkSpendPolicy before issuing the card.
+    // Gate the purchase with a real Monad spend-policy/liveness check before
+    // issuing a Rain card.
+    const spendPolicyOk = await checkSpendPolicy(quote.totalLandedCost);
+    if (!spendPolicyOk) {
+      throw new Error("Monad spend-policy check failed — refusing to release funds.");
+    }
+
     const result = isRainConfigured()
       ? await completeOrderViaRain(quote)
       : completeOrderSimulated(quote);

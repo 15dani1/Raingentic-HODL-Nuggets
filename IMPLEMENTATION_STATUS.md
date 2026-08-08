@@ -6,27 +6,30 @@ does.
 
 ## Why does it "work" without Rain/Monad API keys?
 
-Everything you see right now is running on **mocked/simulated data** — no
-real calls to Rain, Monad, Amazon, Walmart, UPS, FedEx, etc. are being made.
+Product prices, retailer names, and per-retailer shipping costs still come
+from a hardcoded seed file (`src/backend/data/mockData.ts`) — there are no
+real calls to Amazon, Walmart, UPS, FedEx, etc.
 
-- Product prices, retailer names, and per-retailer shipping costs come from
-  a hardcoded seed file: `src/backend/data/mockData.ts`.
-- The `/api/checkout` route does **not** call Rain — it just returns a fake
-  "confirmed" response immediately (see `src/app/api/checkout/route.ts`).
-  There's a `TODO(backend)` comment there marking exactly where real Rain
-  calls need to go.
-- `src/backend/rain/client.ts` and `src/backend/monad/client.ts` are stub
-  files. They read your API key / user ID / team ID / collateral contract
-  ID from environment variables, but the actual functions
-  (`issueScopedCard`, `executePurchase`, `checkSpendPolicy`) just throw a
-  "not implemented yet" error if called — and right now, nothing calls
-  them yet.
+**Rain, however, is now real.** `src/backend/rain/client.ts` is a full
+TypeScript port of the team's working `rain_demo.py` sandbox script — it
+generates an RSA-encrypted Rain session, issues a real scoped card in
+Rain's sandbox (`api-dev.raincards.xyz`), and runs a real
+authorize → settle transaction against it.
 
-**In short: this is a working prototype of the UI and pricing logic, wired
-up to fake data, so the frontend and backend can be built and demoed in
-parallel before real integrations exist.** Once your Rain keys are added to
-`.env.local` and the backend implements the TODOs, real purchases can be
-wired in without changing the frontend at all (same API contract).
+- If `RAIN_API_KEY`, `RAIN_USER_ID`, and `RAIN_CONTRACT_ID` are set (see
+  `.env.example` / your local `.env`), `POST /api/checkout` issues a real
+  scoped Rain card and executes a real sandbox purchase. The returned
+  `orderId` is Rain's actual transaction id in that case.
+- If those env vars are **not** set, checkout automatically falls back to a
+  simulated `orderId` (`sim-<timestamp>`) so the frontend keeps working for
+  anyone without Rain credentials configured.
+- `src/backend/monad/client.ts` is still a stub — `checkSpendPolicy` throws
+  "not implemented yet" and nothing calls it yet.
+
+**In short: the UI, pricing logic, and quantity-mismatch flow are fully
+wired up end-to-end, and checkout now performs a real Rain sandbox
+transaction whenever credentials are present — with a safe simulated
+fallback when they're not.**
 
 ## What's implemented
 
@@ -47,11 +50,14 @@ wired in without changing the frontend at all (same API contract).
 - ✅ 12 sample products, each with a real photo (see "About the images"
   below) and a live estimated delivery date.
 - ✅ API routes: `/api/products`, `/api/quote` (single-unit display price),
-  `/api/checkout` (full arbitrage + quantity-mismatch confirmation),
-  `/api/dashboard` — all backed by mocked data.
-- ❌ Not implemented: real Rain card issuance/purchase execution, real Monad
-  spend-policy checks, real retailer/shipping APIs, user accounts/auth,
-  multi-agent competition, reward payouts.
+  `/api/checkout` (full arbitrage + quantity-mismatch confirmation +
+  real Rain purchase), `/api/dashboard` — pricing data is mocked, Rain
+  execution is real when credentials are configured.
+- ✅ Real Rain sandbox integration (`src/backend/rain/client.ts`, ported
+  from `rain_demo.py`): session-id generation (RSA-OAEP/SHA-1 encrypted),
+  scoped card issuance, and authorize + settle transaction execution.
+- ❌ Not implemented: real Monad spend-policy checks, real retailer/shipping
+  APIs, user accounts/auth, multi-agent competition, reward payouts.
 
 ## What happens when you click "Buy now"
 
@@ -67,10 +73,13 @@ wired in without changing the frontend at all (same API contract).
    shipping), checkout pauses and shows a prompt: "Buy the pack" or "No,
    just 1" — no charge happens until you answer.
 4. Once resolved (or immediately, if there was no mismatch), checkout
-   returns a fake `orderId` and `status: "confirmed"` — no money moves, no
-   Rain card is issued yet. It's there so the full user flow (browse →
-   price → buy → confirm quantity if needed → confirmation) can be demoed
-   end-to-end while the real payment integration is being built.
+   calls Rain: it issues a real scoped card capped at the landed cost
+   amount, then runs authorize + settle against it in Rain's sandbox. On
+   success you get back Rain's real transaction id and
+   `status: "confirmed"`. If Rain isn't configured (no `.env` credentials),
+   or the sandbox call fails, you get a simulated `orderId`/failure instead
+   — the full user flow (browse → price → buy → confirm quantity if
+   needed → confirmation) still works either way.
 
 ### Note on multi-pack pricing realism
 
@@ -94,12 +103,11 @@ stock photos later by updating `imageUrl` in `src/backend/data/mockData.ts`.
 
 ## Next steps to make this "real"
 
-1. Add your Rain API key, user ID, team ID, and collateral contract ID to
-   `.env.local` (see `.env.example`).
-2. Implement `issueScopedCard` and `executePurchase` in
-   `src/backend/rain/client.ts`, and call them from
-   `src/app/api/checkout/route.ts` instead of returning a fake result.
-3. Implement `checkSpendPolicy` in `src/backend/monad/client.ts` if you want
+1. ~~Add your Rain API key, user ID, and contract ID to `.env`~~ — done;
+   Rain purchases in `/api/checkout` are now live against the sandbox.
+2. Implement `checkSpendPolicy` in `src/backend/monad/client.ts` if you want
    on-chain spend-limit enforcement before a purchase goes through.
-4. Replace the mocked retailer/shipping data with real pricing sources once
+3. Replace the mocked retailer/shipping data with real pricing sources once
    you have them.
+4. Decide on production error-handling for Rain failures (currently any
+   sandbox error surfaces as `status: "failed"` with a 502).

@@ -8,9 +8,12 @@
  * result with a quantityMismatch prompt instead of completing the order —
  * the client must re-submit with `acceptedPackQuantity` set to true/false.
  *
- * NOTE: Rain purchase execution (issueScopedCard / executePurchase) is not
- * implemented yet — this currently returns a simulated confirmation so the
- * frontend can be built against a stable contract.
+ * Rain integration: if RAIN_API_KEY / RAIN_USER_ID / RAIN_CONTRACT_ID are
+ * set (see .env.example), this issues a real scoped card in Rain's
+ * sandbox and simulates authorize + settle against it via
+ * src/backend/rain/client.ts (ported from rain_demo.py). If those env
+ * vars are missing, it falls back to a simulated confirmation so the
+ * frontend keeps working without any credentials configured.
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -18,9 +21,57 @@ import {
   getCheapestOverallQuote,
   getCheapestSingleUnitQuote,
 } from "@/backend/services/arbitrageEngine";
-import type { CheckoutRequest, CheckoutResult } from "@/shared/types";
+import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
+import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
 
 const MARGIN_RATE = 1.12;
+const DEFAULT_MCC = "5999"; // Miscellaneous and specialty retail stores
+
+function isRainConfigured(): boolean {
+  try {
+    getRainConfig();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function completeOrderViaRain(quote: LandedCostQuote): Promise<CheckoutResult> {
+  const totalChargedToUser = Math.round(quote.totalLandedCost * MARGIN_RATE * 100) / 100;
+  const amountInUsdCents = Math.round(quote.totalLandedCost * 100);
+
+  const card = await issueScopedCard(amountInUsdCents);
+  const { transactionId } = await executePurchase(
+    card.id,
+    amountInUsdCents,
+    quote.retailer,
+    DEFAULT_MCC,
+  );
+
+  return {
+    orderId: transactionId,
+    productId: quote.productId,
+    retailer: quote.retailer,
+    carrier: quote.carrier,
+    totalPaidByAgent: quote.totalLandedCost,
+    totalChargedToUser,
+    estimatedDelivery: quote.estimatedDelivery,
+    status: "confirmed",
+  };
+}
+
+function completeOrderSimulated(quote: LandedCostQuote): CheckoutResult {
+  return {
+    orderId: `sim-${Date.now()}`,
+    productId: quote.productId,
+    retailer: quote.retailer,
+    carrier: quote.carrier,
+    totalPaidByAgent: quote.totalLandedCost,
+    totalChargedToUser: Math.round(quote.totalLandedCost * MARGIN_RATE * 100) / 100,
+    estimatedDelivery: quote.estimatedDelivery,
+    status: "confirmed",
+  };
+}
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as CheckoutRequest;
@@ -54,18 +105,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unknown productId" }, { status: 404 });
   }
 
-  // TODO(backend): replace with real Rain issueScopedCard + executePurchase,
-  // gated by Monad checkSpendPolicy.
-  const result: CheckoutResult = {
-    orderId: `sim-${Date.now()}`,
-    productId: body.productId,
-    retailer: quote.retailer,
-    carrier: quote.carrier,
-    totalPaidByAgent: quote.totalLandedCost,
-    totalChargedToUser: Math.round(quote.totalLandedCost * MARGIN_RATE * 100) / 100,
-    estimatedDelivery: quote.estimatedDelivery,
-    status: "confirmed",
-  };
-
-  return NextResponse.json(result);
+  try {
+    // TODO(backend): gate this with Monad checkSpendPolicy before issuing the card.
+    const result = isRainConfigured()
+      ? await completeOrderViaRain(quote)
+      : completeOrderSimulated(quote);
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("Checkout failed:", err);
+    const failed: CheckoutResult = {
+      orderId: "",
+      productId: quote.productId,
+      retailer: quote.retailer,
+      carrier: quote.carrier,
+      totalPaidByAgent: 0,
+      totalChargedToUser: 0,
+      estimatedDelivery: quote.estimatedDelivery,
+      status: "failed",
+    };
+    return NextResponse.json(failed, { status: 502 });
+  }
 }

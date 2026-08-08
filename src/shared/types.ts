@@ -13,19 +13,21 @@ export interface Product {
   unitQuantity: number;
 }
 
+export interface ShippingOption {
+  carrier: string;
+  cost: number;
+  /** Estimated delivery date, ISO 8601. */
+  estimatedDelivery: string;
+}
+
 export interface RetailerListing {
   retailer: string;
   /** Price for this specific listing (may cover more than 1 unit). */
   price: number;
   /** Quantity/pack size this price covers, e.g. 4 for a 4-pack. */
   packQuantity: number;
-}
-
-export interface ShippingOption {
-  carrier: string;
-  cost: number;
-  /** Estimated delivery date, ISO 8601. */
-  estimatedDelivery: string;
+  /** Shipping options offered by this specific retailer for this listing. */
+  shippingOptions: ShippingOption[];
 }
 
 export interface LandedCostQuote {
@@ -78,5 +80,13 @@ export interface CheckoutResult {
   totalPaidByAgent: number;
   totalChargedToUser: number;
   estimatedDelivery: string;
-  status: "confirmed" | "pending" | "failed";
+  status: "confirmed" | "pending" | "failed" | "needs_confirmation";
+  /**
+   * Present only when status is "needs_confirmation" — the arbitrage
+   * process (triggered by Buy Now) found that the cheapest total price
+   * requires buying a larger pack than requested. The UI must ask the user
+   * to accept or decline, then re-submit the checkout with
+   * `acceptedPackQuantity` set.
+   */
+  quantityMismatch?: QuantityMismatchPrompt;
 }

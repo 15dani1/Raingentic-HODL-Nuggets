@@ -4,46 +4,84 @@
  */
 "use client";
 
-import { useState } from "react";
-import type { Product } from "@/shared/types";
+import { useEffect, useState } from "react";
+import type { CheckoutResult, Product, QuantityMismatchPrompt } from "@/shared/types";
 
 interface ProductCardProps {
   product: Product;
 }
 
+async function submitCheckout(
+  productId: string,
+  acceptedPackQuantity?: boolean,
+): Promise<CheckoutResult> {
+  const res = await fetch("/api/checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productId,
+      requestedQuantity: 1,
+      ...(acceptedPackQuantity === undefined ? {} : { acceptedPackQuantity }),
+    }),
+  });
+  return res.json();
+}
+
 export function ProductCard({ product }: ProductCardProps) {
   const [price, setPrice] = useState<number | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
-  const [mismatchMessage, setMismatchMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingPrice, setLoadingPrice] = useState(true);
+  const [buying, setBuying] = useState(false);
+  const [mismatch, setMismatch] = useState<QuantityMismatchPrompt | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  async function loadQuote() {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/quote?productId=${product.id}&quantity=1`);
-      const data = await res.json();
-      setPrice(data.price?.price ?? null);
-      setDelivery(data.price?.estimatedDelivery ?? null);
-      setMismatchMessage(data.quantityMismatch?.message ?? null);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/quote?productId=${product.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        setPrice(data.price?.price ?? null);
+        setDelivery(data.price?.estimatedDelivery ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrice(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.id]);
 
   async function handleBuy() {
-    setStatus("Placing order...");
-    const res = await fetch("/api/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: product.id, requestedQuantity: 1 }),
-    });
-    const data = await res.json();
+    setBuying(true);
+    setStatus("Finding the best price...");
+    const result = await submitCheckout(product.id);
+
+    if (result.status === "needs_confirmation" && result.quantityMismatch) {
+      setMismatch(result.quantityMismatch);
+      setStatus(null);
+      setBuying(false);
+      return;
+    }
+
+    finishOrder(result);
+  }
+
+  async function respondToMismatch(accept: boolean) {
+    setBuying(true);
+    setStatus(accept ? "Buying the pack..." : "Buying a single unit...");
+    const result = await submitCheckout(product.id, accept);
+    setMismatch(null);
+    finishOrder(result);
+  }
+
+  function finishOrder(result: CheckoutResult) {
     setStatus(
-      data.status === "confirmed"
-        ? `Order confirmed! Arriving ${data.estimatedDelivery}.`
+      result.status === "confirmed"
+        ? `Order confirmed! Arriving ${result.estimatedDelivery}.`
         : "Something went wrong.",
     );
+    setBuying(false);
   }
 
   return (
@@ -56,32 +94,49 @@ export function ProductCard({ product }: ProductCardProps) {
       />
       <h3 className="text-base font-semibold">{product.name}</h3>
 
-      {price === null ? (
-        <button
-          onClick={loadQuote}
-          disabled={loading}
-          className="rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-        >
-          {loading ? "Checking price..." : "Check price"}
-        </button>
+      {loadingPrice ? (
+        <p className="text-sm text-zinc-400">Loading price...</p>
+      ) : price === null ? (
+        <p className="text-sm text-zinc-400">Price unavailable</p>
       ) : (
         <>
           <p className="text-2xl font-semibold">${price.toFixed(2)}</p>
           {delivery && (
             <p className="text-sm text-zinc-500">Estimated delivery: {delivery}</p>
           )}
-          {mismatchMessage && (
-            <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              {mismatchMessage}
-            </p>
-          )}
-          <button
-            onClick={handleBuy}
-            className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-          >
-            Buy now
-          </button>
         </>
+      )}
+
+      {mismatch && (
+        <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <p className="mb-2">{mismatch.message}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => respondToMismatch(true)}
+              disabled={buying}
+              className="rounded-full bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
+            >
+              Buy the pack
+            </button>
+            <button
+              onClick={() => respondToMismatch(false)}
+              disabled={buying}
+              className="rounded-full border border-amber-800 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-200 dark:hover:bg-amber-900"
+            >
+              No, just 1
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!mismatch && (
+        <button
+          onClick={handleBuy}
+          disabled={buying || price === null}
+          className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
+        >
+          {buying ? "Working..." : "Buy now"}
+        </button>
       )}
 
       {status && <p className="text-sm text-zinc-500">{status}</p>}

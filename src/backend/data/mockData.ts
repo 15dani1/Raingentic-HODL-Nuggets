@@ -7,217 +7,368 @@
  * return. Swap this out for real integrations later without changing the
  * shape consumed by the arbitrage engine or frontend.
  *
- * NOTE ON IMAGES: `imageUrl` values point to placehold.co, a placeholder
- * image service (no API key needed) that renders a colored box with the
- * product name. These are stand-ins for the demo — swap for real product
- * photos (or images returned by a real retailer API) later.
+ * NOTE ON IMAGES: `imageUrl` values point to loremflickr.com, a free image
+ * service that serves real Flickr photos matching the given tags (no API
+ * key needed). The `?lock=` query param pins a stable photo per product so
+ * it doesn't change on every reload. These are still stand-ins for the demo
+ * — swap for real product photos (or images from a real retailer API) later.
+ *
+ * NOTE ON PRICING: a multi-pack's listing price must always be higher than
+ * any single-unit listing price for the same product — buying more units
+ * should never cost less, in raw price, than buying one. Shipping is now
+ * modeled per retailer (different retailers really do offer different
+ * carriers/rates), so it's possible for a multi-pack's *total landed cost*
+ * (price + its own shipping) to come out cheaper than a single unit's total
+ * landed cost elsewhere — that's the realistic "buy a 4-pack you didn't
+ * need" scenario the quantity-mismatch prompt is designed to catch.
  */
 
-import type { Product, RetailerListing, ShippingOption } from "@/shared/types";
+import type { Product, RetailerListing } from "@/shared/types";
 
-function placeholderImage(label: string, bg: string, fg = "ffffff") {
-  return `https://placehold.co/400x400/${bg}/${fg}?text=${encodeURIComponent(label)}`;
+function productImage(tag: string, lock: number) {
+  return `https://loremflickr.com/400/400/${tag}?lock=${lock}`;
 }
 
 export const PRODUCTS: Product[] = [
   {
     id: "toothpaste-travel",
     name: "Travel-Size Toothpaste",
-    imageUrl: placeholderImage("Toothpaste", "38bdf8"),
+    imageUrl: productImage("toothpaste", 1),
     unitQuantity: 1,
   },
   {
     id: "headphones-wireless",
     name: "Wireless Noise-Cancelling Headphones",
-    imageUrl: placeholderImage("Headphones", "1e293b"),
+    imageUrl: productImage("headphones", 2),
     unitQuantity: 1,
   },
   {
     id: "phone-charger",
     name: "USB-C Fast Charger",
-    imageUrl: placeholderImage("USB-C Charger", "f97316"),
+    imageUrl: productImage("usb,charger", 3),
     unitQuantity: 1,
   },
   {
     id: "water-bottle",
     name: "Insulated Steel Water Bottle",
-    imageUrl: placeholderImage("Water Bottle", "0ea5e9"),
+    imageUrl: productImage("water,bottle", 4),
     unitQuantity: 1,
   },
   {
     id: "running-shoes",
     name: "Running Shoes",
-    imageUrl: placeholderImage("Running Shoes", "ef4444"),
+    imageUrl: productImage("running,shoes", 5),
     unitQuantity: 1,
   },
   {
     id: "backpack",
     name: "Everyday Backpack",
-    imageUrl: placeholderImage("Backpack", "78716c"),
+    imageUrl: productImage("backpack", 6),
     unitQuantity: 1,
   },
   {
     id: "wireless-mouse",
     name: "Wireless Mouse",
-    imageUrl: placeholderImage("Mouse", "6366f1"),
+    imageUrl: productImage("computer,mouse", 7),
     unitQuantity: 1,
   },
   {
     id: "mechanical-keyboard",
     name: "Mechanical Keyboard",
-    imageUrl: placeholderImage("Keyboard", "14b8a6"),
+    imageUrl: productImage("keyboard", 8),
     unitQuantity: 1,
   },
   {
     id: "coffee-beans",
     name: "Whole Bean Coffee (12oz)",
-    imageUrl: placeholderImage("Coffee Beans", "78350f"),
+    imageUrl: productImage("coffee,beans", 9),
     unitQuantity: 1,
   },
   {
     id: "sunglasses",
     name: "Polarized Sunglasses",
-    imageUrl: placeholderImage("Sunglasses", "111827"),
+    imageUrl: productImage("sunglasses", 10),
     unitQuantity: 1,
   },
   {
     id: "yoga-mat",
     name: "Non-Slip Yoga Mat",
-    imageUrl: placeholderImage("Yoga Mat", "8b5cf6"),
+    imageUrl: productImage("yoga,mat", 11),
     unitQuantity: 1,
   },
   {
     id: "bluetooth-speaker",
     name: "Portable Bluetooth Speaker",
-    imageUrl: placeholderImage("Speaker", "db2777"),
+    imageUrl: productImage("speaker", 12),
     unitQuantity: 1,
   },
 ];
 
-/** Retailer listings keyed by product id. Includes multi-pack edge cases. */
+/**
+ * Retailer listings keyed by product id, each with its own shipping
+ * options. Multi-pack listings always have a higher raw price than any
+ * single-unit listing for the same product.
+ */
 export const RETAILER_LISTINGS: Record<string, RetailerListing[]> = {
   "toothpaste-travel": [
-    { retailer: "Amazon", price: 2.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 9.49, packQuantity: 4 },
-    { retailer: "Temu", price: 7.99, packQuantity: 4 },
+    {
+      retailer: "Amazon",
+      price: 2.99,
+      packQuantity: 1,
+      // A single travel-size tube is too small/cheap on its own for
+      // Amazon's discounted shipping tiers, so only pricier carriers apply.
+      shippingOptions: [
+        { carrier: "UPS", cost: 6.25, estimatedDelivery: "2026-08-12" },
+        { carrier: "FedEx", cost: 7.0, estimatedDelivery: "2026-08-11" },
+      ],
+    },
+    {
+      retailer: "Walmart",
+      price: 9.49,
+      packQuantity: 4,
+      shippingOptions: [
+        { carrier: "USPS", cost: 3.0, estimatedDelivery: "2026-08-14" },
+        { carrier: "UPS", cost: 4.5, estimatedDelivery: "2026-08-12" },
+      ],
+    },
+    {
+      retailer: "Temu",
+      price: 7.99,
+      packQuantity: 4,
+      shippingOptions: [
+        // Temu's bulk shipping is cheap enough that the 4-pack ends up as
+        // the cheapest total landed cost, even though its raw price is
+        // higher than Amazon's single unit — this is the scenario that
+        // should trigger the quantity-mismatch prompt at Buy Now time.
+        { carrier: "Standard", cost: 0.99, estimatedDelivery: "2026-08-15" },
+      ],
+    },
   ],
   "headphones-wireless": [
-    { retailer: "Amazon", price: 328.0, packQuantity: 1 },
-    { retailer: "Walmart", price: 298.0, packQuantity: 1 },
-    { retailer: "Temu", price: 245.0, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 328.0,
+      packQuantity: 1,
+      shippingOptions: [
+        { carrier: "USPS", cost: 6.0, estimatedDelivery: "2026-08-14" },
+        { carrier: "UPS", cost: 8.5, estimatedDelivery: "2026-08-12" },
+        { carrier: "FedEx", cost: 10.0, estimatedDelivery: "2026-08-11" },
+      ],
+    },
+    {
+      retailer: "Walmart",
+      price: 298.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 7.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 245.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 3.5, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "phone-charger": [
-    { retailer: "Amazon", price: 15.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 12.49, packQuantity: 2 },
-    { retailer: "Temu", price: 9.99, packQuantity: 2 },
+    {
+      retailer: "Amazon",
+      price: 15.99,
+      packQuantity: 1,
+      shippingOptions: [
+        { carrier: "USPS", cost: 3.75, estimatedDelivery: "2026-08-13" },
+        { carrier: "UPS", cost: 5.0, estimatedDelivery: "2026-08-12" },
+      ],
+    },
+    {
+      retailer: "Walmart",
+      price: 24.99,
+      packQuantity: 2,
+      shippingOptions: [{ carrier: "UPS", cost: 4.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 21.98,
+      packQuantity: 2,
+      shippingOptions: [{ carrier: "Standard", cost: 2.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "water-bottle": [
-    { retailer: "Amazon", price: 24.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 19.99, packQuantity: 1 },
-    { retailer: "Temu", price: 14.5, packQuantity: 2 },
+    {
+      retailer: "Amazon",
+      price: 24.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 4.0, estimatedDelivery: "2026-08-13" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 19.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 5.75, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 34.99,
+      packQuantity: 2,
+      shippingOptions: [{ carrier: "Standard", cost: 3.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "running-shoes": [
-    { retailer: "Amazon", price: 89.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 74.0, packQuantity: 1 },
-    { retailer: "Temu", price: 61.25, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 89.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 9.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 74.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 7.5, estimatedDelivery: "2026-08-14" }],
+    },
+    {
+      retailer: "Temu",
+      price: 61.25,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 5.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   backpack: [
-    { retailer: "Amazon", price: 54.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 45.0, packQuantity: 1 },
-    { retailer: "Temu", price: 39.99, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 54.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 8.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 45.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 6.5, estimatedDelivery: "2026-08-14" }],
+    },
+    {
+      retailer: "Temu",
+      price: 39.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 4.5, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "wireless-mouse": [
-    { retailer: "Amazon", price: 22.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 18.5, packQuantity: 1 },
-    { retailer: "Temu", price: 15.99, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 22.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 3.5, estimatedDelivery: "2026-08-13" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 18.5,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 5.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 15.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 2.5, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "mechanical-keyboard": [
-    { retailer: "Amazon", price: 79.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 69.99, packQuantity: 1 },
-    { retailer: "Temu", price: 58.0, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 79.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 5.0, estimatedDelivery: "2026-08-14" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 69.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 7.0, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 58.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 4.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "coffee-beans": [
-    { retailer: "Amazon", price: 12.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 21.99, packQuantity: 2 },
-    { retailer: "Temu", price: 19.99, packQuantity: 2 },
+    {
+      retailer: "Amazon",
+      price: 12.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 4.25, estimatedDelivery: "2026-08-13" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 21.99,
+      packQuantity: 2,
+      shippingOptions: [{ carrier: "UPS", cost: 5.5, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 19.99,
+      packQuantity: 2,
+      shippingOptions: [{ carrier: "Standard", cost: 3.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   sunglasses: [
-    { retailer: "Amazon", price: 34.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 29.99, packQuantity: 1 },
-    { retailer: "Temu", price: 11.5, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 34.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 3.25, estimatedDelivery: "2026-08-13" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 29.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 4.75, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 11.5,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 2.75, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "yoga-mat": [
-    { retailer: "Amazon", price: 27.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 22.0, packQuantity: 1 },
-    { retailer: "Temu", price: 16.75, packQuantity: 1 },
+    {
+      retailer: "Amazon",
+      price: 27.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 5.5, estimatedDelivery: "2026-08-14" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 22.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 7.25, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 16.75,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 4.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
   "bluetooth-speaker": [
-    { retailer: "Amazon", price: 45.99, packQuantity: 1 },
-    { retailer: "Walmart", price: 39.0, packQuantity: 1 },
-    { retailer: "Temu", price: 32.5, packQuantity: 1 },
-  ],
-};
-
-/** Shipping options keyed by product id. */
-export const SHIPPING_OPTIONS: Record<string, ShippingOption[]> = {
-  "toothpaste-travel": [
-    { carrier: "USPS", cost: 4.5, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 6.25, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 7.0, estimatedDelivery: "2026-08-11" },
-  ],
-  "headphones-wireless": [
-    { carrier: "USPS", cost: 6.0, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 8.5, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 10.0, estimatedDelivery: "2026-08-11" },
-  ],
-  "phone-charger": [
-    { carrier: "USPS", cost: 3.75, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 5.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 6.5, estimatedDelivery: "2026-08-11" },
-  ],
-  "water-bottle": [
-    { carrier: "USPS", cost: 4.0, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 5.75, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 7.25, estimatedDelivery: "2026-08-11" },
-  ],
-  "running-shoes": [
-    { carrier: "USPS", cost: 7.5, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 9.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 11.5, estimatedDelivery: "2026-08-11" },
-  ],
-  backpack: [
-    { carrier: "USPS", cost: 6.5, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 8.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 9.75, estimatedDelivery: "2026-08-11" },
-  ],
-  "wireless-mouse": [
-    { carrier: "USPS", cost: 3.5, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 5.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 6.25, estimatedDelivery: "2026-08-11" },
-  ],
-  "mechanical-keyboard": [
-    { carrier: "USPS", cost: 5.0, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 7.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 8.75, estimatedDelivery: "2026-08-11" },
-  ],
-  "coffee-beans": [
-    { carrier: "USPS", cost: 4.25, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 6.0, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 7.5, estimatedDelivery: "2026-08-11" },
-  ],
-  sunglasses: [
-    { carrier: "USPS", cost: 3.25, estimatedDelivery: "2026-08-13" },
-    { carrier: "UPS", cost: 4.75, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 6.0, estimatedDelivery: "2026-08-11" },
-  ],
-  "yoga-mat": [
-    { carrier: "USPS", cost: 5.5, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 7.25, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 8.5, estimatedDelivery: "2026-08-11" },
-  ],
-  "bluetooth-speaker": [
-    { carrier: "USPS", cost: 6.0, estimatedDelivery: "2026-08-14" },
-    { carrier: "UPS", cost: 7.75, estimatedDelivery: "2026-08-12" },
-    { carrier: "FedEx", cost: 9.25, estimatedDelivery: "2026-08-11" },
+    {
+      retailer: "Amazon",
+      price: 45.99,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "USPS", cost: 6.0, estimatedDelivery: "2026-08-14" }],
+    },
+    {
+      retailer: "Walmart",
+      price: 39.0,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "UPS", cost: 7.75, estimatedDelivery: "2026-08-12" }],
+    },
+    {
+      retailer: "Temu",
+      price: 32.5,
+      packQuantity: 1,
+      shippingOptions: [{ carrier: "Standard", cost: 5.0, estimatedDelivery: "2026-08-16" }],
+    },
   ],
 };

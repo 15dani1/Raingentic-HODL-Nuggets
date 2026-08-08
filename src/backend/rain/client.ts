@@ -15,6 +15,7 @@
  */
 
 import crypto from "crypto";
+import { recordApiCall } from "@/backend/services/callLog";
 
 const BASE_URL = process.env.RAIN_API_BASE_URL ?? "https://api-dev.raincards.xyz/v1";
 
@@ -96,9 +97,10 @@ export function generateSessionId(): RainSession {
 async function apiRequest<T = unknown>(
   method: "GET" | "POST",
   path: string,
-  options: { sessionId?: string; jsonBody?: unknown } = {},
+  options: { sessionId?: string; jsonBody?: unknown; summary?: string } = {},
 ): Promise<T> {
   const { apiKey } = getRainConfig();
+  const startedAt = Date.now();
 
   const headers: Record<string, string> = {
     "Api-Key": apiKey,
@@ -106,21 +108,58 @@ async function apiRequest<T = unknown>(
   };
   if (options.sessionId) headers["sessionid"] = options.sessionId;
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: options.jsonBody !== undefined ? JSON.stringify(options.jsonBody) : undefined,
-  });
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: options.jsonBody !== undefined ? JSON.stringify(options.jsonBody) : undefined,
+    });
 
-  const data = await res.json().catch(() => null);
+    const data = await res.json().catch(() => null);
+    const durationMs = Date.now() - startedAt;
 
-  if (!res.ok) {
-    throw new Error(
-      `Rain API error ${res.status} on ${method} ${path}: ${JSON.stringify(data)}`,
-    );
+    if (!res.ok) {
+      recordApiCall({
+        source: "rain",
+        method,
+        path,
+        success: false,
+        statusCode: res.status,
+        durationMs,
+        summary: options.summary,
+        error: JSON.stringify(data),
+      });
+      throw new Error(
+        `Rain API error ${res.status} on ${method} ${path}: ${JSON.stringify(data)}`,
+      );
+    }
+
+    recordApiCall({
+      source: "rain",
+      method,
+      path,
+      success: true,
+      statusCode: res.status,
+      durationMs,
+      summary: options.summary,
+    });
+
+    return data as T;
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Rain API error")) {
+      throw err; // already recorded above
+    }
+    recordApiCall({
+      source: "rain",
+      method,
+      path,
+      success: false,
+      durationMs: Date.now() - startedAt,
+      summary: options.summary,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
-
-  return data as T;
 }
 
 // ============================================================
@@ -132,6 +171,7 @@ export async function fundCollateral(amountInUsdCents = 100000) {
   const { contractId } = getRainConfig();
   return apiRequest("POST", "/simulate/collateral/fund", {
     jsonBody: { contractId, currency: "rusd", amount: amountInUsdCents },
+    summary: `Funded collateral with $${(amountInUsdCents / 100).toFixed(2)}`,
   });
 }
 
@@ -158,7 +198,11 @@ export async function issueScopedCard(amountInUsdCents: number): Promise<ScopedC
   const card = await apiRequest<ScopedCard>(
     "POST",
     `/issuing/users/${userId}/cards/scoped`,
-    { sessionId, jsonBody: { amountInUSDCents: amountInUsdCents } },
+    {
+      sessionId,
+      jsonBody: { amountInUSDCents: amountInUsdCents },
+      summary: `Issued scoped card capped at $${(amountInUsdCents / 100).toFixed(2)}`,
+    },
   );
 
   if (!card.id) {
@@ -198,6 +242,7 @@ export async function executePurchase(
         merchantName,
         merchantCategoryCode: mcc,
       },
+      summary: `Authorized $${(amountInUsdCents / 100).toFixed(2)} at ${merchantName}`,
     },
   );
 
@@ -212,7 +257,10 @@ export async function executePurchase(
   const settlement = await apiRequest<{ status?: string }>(
     "POST",
     `/simulate/transactions/${transactionId}/settle`,
-    { jsonBody: { amount: amountInUsdCents } },
+    {
+      jsonBody: { amount: amountInUsdCents },
+      summary: `Settled transaction ${transactionId}`,
+    },
   );
 
   if (settlement.status !== "settled") {

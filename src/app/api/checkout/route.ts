@@ -22,6 +22,7 @@ import {
   getCheapestSingleUnitQuote,
 } from "@/backend/services/arbitrageEngine";
 import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
+import { recordApiCall } from "@/backend/services/callLog";
 import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
 
 const MARGIN_RATE = 1.12;
@@ -105,14 +106,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unknown productId" }, { status: 404 });
   }
 
+  const startedAt = Date.now();
   try {
     // TODO(backend): gate this with Monad checkSpendPolicy before issuing the card.
     const result = isRainConfigured()
       ? await completeOrderViaRain(quote)
       : completeOrderSimulated(quote);
+    recordApiCall({
+      source: "checkout",
+      method: "POST",
+      path: `/api/checkout (${quote.productId})`,
+      success: true,
+      durationMs: Date.now() - startedAt,
+      summary: `${isRainConfigured() ? "Rain" : "simulated"} order via ${quote.retailer}/${quote.carrier} — $${quote.totalLandedCost.toFixed(2)}`,
+    });
     return NextResponse.json(result);
   } catch (err) {
     console.error("Checkout failed:", err);
+    recordApiCall({
+      source: "checkout",
+      method: "POST",
+      path: `/api/checkout (${quote.productId})`,
+      success: false,
+      durationMs: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    });
     const failed: CheckoutResult = {
       orderId: "",
       productId: quote.productId,

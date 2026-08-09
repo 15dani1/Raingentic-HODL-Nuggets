@@ -11,13 +11,15 @@ watching over your shoulder" version.
 ## The short version
 
 1. You load the **marketplace** (`/`) → prices/delivery dates appear automatically.
-2. You click **Buy Now** → the agent does a deeper price search across every retailer/pack size.
-3. (Sometimes) it asks you to confirm buying a multi-pack instead of 1 item.
-4. It checks with **Monad** that it's safe to spend money.
-5. It asks **Rain** for a one-time spending card, locked to the exact amount.
-6. It uses that card to "buy" the item in Rain's sandbox (authorize → settle).
-7. You get an order confirmation.
-8. Every single one of those steps gets logged and shows up on the **developer dashboard** (`/dev`) in real time.
+2. You can drag a **delivery-time slider** to trade a longer wait for a lower price.
+3. You click **Buy Now** → the agent does a deeper price search across every retailer/pack size.
+4. (Sometimes) it asks you to confirm buying a multi-pack instead of 1 item.
+5. It checks with **Monad** that it's safe to spend money.
+6. It asks **Rain** for a one-time spending card, locked to the exact amount.
+7. It uses that card to "buy" the item in Rain's sandbox (authorize → settle).
+8. It broadcasts a real **Monad on-chain settlement transaction** from the agent's wallet.
+9. You get an order confirmation.
+10. Every single one of those steps gets logged and shows up on the **developer dashboard** (`/dev`) in real time, including a full "receipt" for each order.
 
 Now, step by step.
 
@@ -34,13 +36,27 @@ at all — it's pure math:
   sites).
 - Only consider single-item listings (not 4-packs) — you're looking at
   "buy 1" pricing at this point.
+- Filter out anything that can't arrive within your chosen delivery
+  window (see the slider below).
 - Find the cheapest total: item price + shipping.
-- Add the agent's margin (12%) on top — that's how the agent would make
-  money if this were real.
+- Add the agent's margin on top — that's how the agent would make money
+  if this were real. The margin isn't a flat percentage: it scales down
+  as the item gets pricier (18% under $20, down to 5% over $300) and
+  shrinks further the longer you're willing to wait, since slower
+  shipping is cheaper for the agent to use. There's always a small floor
+  so the agent never sells at a loss.
 - Show that price + the estimated delivery date.
 
 This is intentionally the **cheap, fast lookup**. Nothing is booked or
 charged yet.
+
+### The delivery-time slider
+
+Next to the price, you can drag a slider from 2 to 10 days. A longer
+window unlocks slower, cheaper shipping options the agent wouldn't
+otherwise consider — so you're trading wait time for a better price
+(and the agent still keeps a smaller margin on the savings). Moving the
+slider re-runs the quote above with the new cutoff.
 
 ---
 
@@ -79,16 +95,13 @@ reachable. Think of this like the agent "checking its own pulse" before
 spending — a very simple version of an on-chain rule that says "don't
 authorize a purchase if the safety-check network is down."
 
-Concretely, it makes 3 real, live network calls:
+Concretely, it makes a few real, live network calls:
 - "What chain am I on?" (`eth_chainId`)
 - "What's the latest block?" (`eth_blockNumber`) — this is also the actual
   gate check; if this fails, the purchase is blocked.
 - "What's the current gas price?" (`eth_gasPrice`) — just for visibility on the dashboard.
-
-These are **read-only** — no money moves on Monad itself yet, and nothing
-is written to the blockchain. It's purely a safety/liveness check today.
-(Down the road, this is where a real on-chain spend-limit contract, and
-eventually multi-agent reward payouts, would plug in.)
+- "What's my wallet's balance?" (`eth_getBalance`) — so you can watch the
+  agent's real MON balance on the dashboard.
 
 If Monad can't be reached, checkout stops right there and the order fails
 — better to block a purchase than let the agent spend blind.
@@ -131,7 +144,24 @@ If both succeed, you get back a real transaction ID from Rain and a
 
 ---
 
-## Step 6 — What you see as the user
+## Step 6 — Monad settles the order on-chain
+
+Once the Rain purchase is confirmed, the agent broadcasts a **real,
+mined transaction** on Monad testnet from its own wallet — this is not a
+simulation, it's an actual signed transaction that gets included in a
+block. The amount is scaled down from the order's landed cost (roughly
+$1 → 0.001 MON) so a handful of demo purchases don't drain the whole
+faucet balance in one sitting.
+
+The point of this step is accountability: every Rain purchase leaves a
+real, verifiable trace on-chain, and the agent's wallet balance visibly
+decreases with every order. If no wallet/signer is configured, this step
+is silently skipped and checkout still completes normally using only the
+liveness check from Step 3.
+
+---
+
+## Step 7 — What you see as the user
 
 Back on the marketplace, you get a confirmation with the order details:
 retailer, carrier, what the agent actually paid, what you were charged
@@ -139,27 +169,32 @@ retailer, carrier, what the agent actually paid, what you were charged
 
 ---
 
-## Step 7 — What shows up on the Developer Dashboard (`/dev`)
+## Step 8 — What shows up on the Developer Dashboard (`/dev`)
 
-Every single network call made in steps 3–5 is logged the moment it
+Every single network call made in steps 3–6 is logged the moment it
 happens — timestamp, which system it hit (Monad or Rain), success/failure,
-how long it took, and a short plain-English summary. The dashboard shows:
+how long it took, and a short plain-English summary. The dashboard shows,
+top to bottom:
 
-- **Rain status** — whether real credentials are configured, or it's
-  running in simulated fallback mode.
-- **Monad status** — is the testnet reachable right now, what's the
-  current chain ID / latest block / gas price, so you can see it's a real,
-  live network and not fake data.
-- **Aggregate stats** — total calls made, how many succeeded/failed,
-  success rate, and average response time — auto-refreshes every few
-  seconds.
-- **The call log itself** — a running list of every individual API call
-  (e.g. "Issued scoped card capped at $19.74", "Authorized $19.74 at
-  Amazon", "Settled transaction ...", or a Monad "eth_blockNumber" ping),
-  newest first, color-coded by which system it came from.
-- **Pricing & shipping table** — the full breakdown of every mocked
-  retailer/carrier/price/shipping combination per product, so you can
-  cross-check why a certain retailer "won."
+- **Rain & Monad status** — whether real Rain credentials are configured
+  (or it's running in simulated fallback mode), and whether Monad testnet
+  is reachable, with live chain ID / latest block / gas price / wallet
+  balance so you can see it's a real, live network and not fake data.
+- **Profit** — total profit, average profit per order, and a table of
+  every completed order with what the agent paid vs. what the user was
+  charged. Click **View** on any order to expand its full **receipt** —
+  every Rain call (card issuance, authorize, settle) and the Monad
+  on-chain settlement transaction tied to that specific purchase.
+- **Rain API Calls** — the full, unabridged list of every Rain/checkout
+  call, with a "type" column (Card issuance, Authorization, Settlement,
+  Checkout) so you don't have to guess what each row means.
+- **Monad On-Chain Settlements** — just the real settlement transactions
+  (not the frequent read-only polling calls), showing the wallet balance
+  before/after and the transaction hash for each purchase.
+- **All API Call Volume** — aggregate stats (total calls, success rate,
+  average latency) and a side-by-side Rain vs. Monad call log, pushed to
+  the bottom since Monad's high polling volume isn't the most meaningful
+  thing to look at first.
 
 This dashboard exists specifically so you (as the engineer) can see
 everything the agent did on your behalf without having to dig through
@@ -175,12 +210,16 @@ couple seconds.
 | Retailer prices/shipping (Amazon/Walmart/Temu) | **Mocked** — hardcoded sample data, not real retailer APIs |
 | Marketplace price shown on load | Real math, over mocked data |
 | Quantity-mismatch prompt | Fully real logic |
-| Monad network check | **Real** — actual live calls to Monad testnet |
+| Delivery-time / price tradeoff slider | Fully real logic, over mocked shipping data |
+| Monad network + wallet balance check | **Real** — actual live calls to Monad testnet |
 | Rain card issuance + authorize/settle | **Real** — actual calls to Rain's sandbox, using your API credentials |
-| Money actually moving | No — Rain's sandbox and Monad testnet are both test environments, no real funds involved |
+| Monad on-chain settlement transaction | **Real** — an actual signed, mined transaction on Monad testnet (if a wallet/signer is configured) |
+| Money actually moving | No — Rain's sandbox and Monad testnet are both test environments, no real-world funds involved |
 | On-chain spend-limit enforcement | Not yet — today it's a liveness check, not a real spend-policy contract |
-| Multi-agent competition / reward payouts | Not built yet (future phase, needs a funded Monad signer) |
+| Multi-agent competition / reward payouts | Not built yet (future phase) |
 
 If Rain credentials aren't configured in `.env`, checkout automatically
 falls back to a simulated confirmation so the app still works end-to-end
-for demo purposes — the dashboard will show you which mode you're in.
+for demo purposes — the dashboard will show you which mode you're in. If
+no Monad wallet/private key is configured, the on-chain settlement step
+is simply skipped.

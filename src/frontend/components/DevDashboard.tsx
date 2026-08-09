@@ -153,6 +153,63 @@ function RainCallLogTable({ calls, now }: { calls: ApiCallLogEntry[]; now: numbe
   );
 }
 
+function MonadSettlementTable({ calls, now }: { calls: ApiCallLogEntry[]; now: number }) {
+  const settlements = calls.filter((c) => c.path === "eth_sendTransaction");
+  return (
+    <div className="mb-14 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
+          <tr>
+            <th className="px-4 py-2">Time</th>
+            <th className="px-4 py-2">Status</th>
+            <th className="px-4 py-2">Duration</th>
+            <th className="px-4 py-2">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {settlements.length === 0 && (
+            <tr>
+              <td colSpan={4} className="px-4 py-6 text-center text-zinc-400">
+                No on-chain settlements yet — click Buy Now on the marketplace to send one.
+              </td>
+            </tr>
+          )}
+          {settlements.map((call) => {
+            const isNew = now - new Date(call.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+            return (
+              <tr
+                key={call.id}
+                className={
+                  "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                  (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                }
+              >
+                <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
+                  {new Date(call.timestamp).toLocaleTimeString()}
+                </td>
+                <td className="px-4 py-2">
+                  <span
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (call.success
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300")
+                    }
+                  >
+                    {call.success ? `OK${call.statusCode ? ` ${call.statusCode}` : ""}` : "FAILED"}
+                  </span>
+                </td>
+                <td className="px-4 py-2 whitespace-nowrap">{call.durationMs}ms</td>
+                <td className="px-4 py-2 text-zinc-500">{call.error ?? call.summary ?? ""}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function CallLogPanel({
   title,
   calls,
@@ -464,6 +521,17 @@ export function DevDashboard() {
       </p>
       <RainCallLogTable calls={(metrics?.calls ?? []).filter((c) => c.source !== "monad")} now={now} />
 
+      {/* Monad on-chain settlements — shown separately and up top, since
+          this is the line that actually matters for Monad (real,
+          mined transactions that decrease the wallet balance) and gets
+          drowned out by frequent read-only RPC polling calls below. */}
+      <h2 className="mb-3 text-lg font-semibold">Monad On-Chain Settlements</h2>
+      <p className="mb-4 text-zinc-500">
+        Real Monad testnet transactions broadcast to settle each purchase — this is
+        where the wallet balance actually decreases.
+      </p>
+      <MonadSettlementTable calls={metrics?.calls ?? []} now={now} />
+
       {/* Aggregate call stats — pushed to the bottom since raw call volume
           (dominated by frequent Monad RPC polling) is less meaningful than
           profit or the Rain call detail above. */}
@@ -489,8 +557,10 @@ export function DevDashboard() {
           now={now}
         />
         <CallLogPanel
-          title="Monad"
-          calls={(metrics?.calls ?? []).filter((c) => c.source === "monad")}
+          title="Monad (read-only polling)"
+          calls={(metrics?.calls ?? []).filter(
+            (c) => c.source === "monad" && c.path !== "eth_sendTransaction",
+          )}
           emptyMessage="No Monad calls yet."
           now={now}
         />

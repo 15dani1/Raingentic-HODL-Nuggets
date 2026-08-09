@@ -83,7 +83,11 @@ export function getMonadConfig() {
 let rpcId = 1;
 
 /** Minimal JSON-RPC 2.0 call against the configured Monad RPC endpoint. */
-async function rpcCall<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+async function rpcCall<T = unknown>(
+  method: string,
+  params: unknown[] = [],
+  formatSummary?: (result: T) => string,
+): Promise<T> {
   const startedAt = Date.now();
   const body = { jsonrpc: "2.0", id: rpcId++, method, params };
 
@@ -109,6 +113,17 @@ async function rpcCall<T = unknown>(method: string, params: unknown[] = []): Pro
       throw new Error(`Monad RPC error on ${method}: ${JSON.stringify(data.error ?? res.status)}`);
     }
 
+    let summary: string | undefined;
+    try {
+      summary = formatSummary
+        ? formatSummary(data.result as T)
+        : typeof data.result === "string"
+          ? `-> ${data.result}`
+          : undefined;
+    } catch {
+      summary = typeof data.result === "string" ? `-> ${data.result}` : undefined;
+    }
+
     recordApiCall({
       source: "monad",
       method: "POST",
@@ -116,7 +131,7 @@ async function rpcCall<T = unknown>(method: string, params: unknown[] = []): Pro
       success: true,
       statusCode: res.status,
       durationMs,
-      summary: typeof data.result === "string" ? `-> ${data.result}` : undefined,
+      summary,
     });
 
     return data.result as T;
@@ -144,6 +159,15 @@ export interface MonadNetworkStatus {
   walletBalanceWei: string | null;
 }
 
+/** MON amount formatted for display, e.g. "4.997858 MON". */
+function formatMon(wei: bigint): string {
+  return `${ethers.formatEther(wei)} MON`;
+}
+
+// Last-seen wallet balance, so we can show "previous -> new" deltas in the
+// call log whenever the balance is re-read (e.g. after a purchase).
+let lastKnownBalanceWei: bigint | null = null;
+
 /**
  * Reads real, current network status from Monad testnet: chain id, latest
  * block number, current gas price, and (if MONAD_WALLET_ADDRESS is set)
@@ -154,11 +178,26 @@ export interface MonadNetworkStatus {
  */
 export async function getNetworkStatus(): Promise<MonadNetworkStatus> {
   const [chainIdHex, blockHex, gasPriceHex, balanceHex] = await Promise.all([
-    rpcCall<string>("eth_chainId"),
-    rpcCall<string>("eth_blockNumber"),
-    rpcCall<string>("eth_gasPrice"),
+    rpcCall<string>("eth_chainId", [], (hex) => `Chain ID: ${parseInt(hex, 16)}`),
+    rpcCall<string>("eth_blockNumber", [], (hex) => `Latest block: #${parseInt(hex, 16).toLocaleString()}`),
+    rpcCall<string>(
+      "eth_gasPrice",
+      [],
+      (hex) => `Gas price: ${(Number(BigInt(hex)) / 1e9).toFixed(2)} gwei`,
+    ),
     MONAD_WALLET_ADDRESS
-      ? rpcCall<string>("eth_getBalance", [MONAD_WALLET_ADDRESS, "latest"])
+      ? rpcCall<string>("eth_getBalance", [MONAD_WALLET_ADDRESS, "latest"], (hex) => {
+          const balance = BigInt(hex);
+          const previous = lastKnownBalanceWei;
+          const changed = previous !== null && previous !== balance;
+          const summary = changed
+            ? `Wallet balance: ${formatMon(previous)} -> ${formatMon(balance)} (${
+                balance < previous ? "-" : "+"
+              }${formatMon(balance > previous ? balance - previous : previous - balance)})`
+            : `Wallet balance: ${formatMon(balance)}`;
+          lastKnownBalanceWei = balance;
+          return summary;
+        })
       : Promise.resolve(null),
   ]);
 
@@ -202,11 +241,17 @@ export async function settlePurchaseOnChain(
     const amountMon = Math.max(landedCostUsd * USD_TO_MON_SETTLEMENT_RATE, 0.0001);
     const value = ethers.parseEther(amountMon.toFixed(8));
 
+    const balanceBefore = await provider.getBalance(MONAD_WALLET_ADDRESS);
+
     const tx = await wallet.sendTransaction({
       to: MONAD_WALLET_ADDRESS,
       value,
     });
     const receipt = await tx.wait();
+
+    const balanceAfter = await provider.getBalance(MONAD_WALLET_ADDRESS);
+    lastKnownBalanceWei = balanceAfter;
+    const spent = balanceBefore - balanceAfter;
 
     recordApiCall({
       source: "monad",
@@ -214,7 +259,9 @@ export async function settlePurchaseOnChain(
       path: "eth_sendTransaction",
       success: true,
       durationMs: Date.now() - startedAt,
-      summary: `Settled order ${orderId} on-chain: ${amountMon.toFixed(6)} MON, tx ${tx.hash}`,
+      summary: `Order ${orderId.slice(0, 8)}: balance ${formatMon(
+        balanceBefore,
+      )} -> ${formatMon(balanceAfter)} (spent ${formatMon(spent)}, incl. gas), tx ${tx.hash}`,
     });
 
     return { txHash: receipt?.hash ?? tx.hash, amountWei: value.toString() };

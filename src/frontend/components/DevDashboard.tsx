@@ -11,7 +11,7 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ApiCallLogEntry, CallLogStats } from "@/backend/services/callLog";
 import type { OrderLogEntry, ProfitStats } from "@/backend/services/orderLog";
 
@@ -210,6 +210,68 @@ function MonadSettlementTable({ calls, now }: { calls: ApiCallLogEntry[]; now: n
   );
 }
 
+/** Finds all API calls (Rain + Monad) tied to a specific completed order,
+ * for building a per-order "receipt" view. Calls aren't stored with an
+ * explicit orderId, so this matches on the transaction id embedded in the
+ * settle/monad-settlement paths and summaries, plus the paid amount for
+ * the card-issuance/authorize steps (which don't carry an id). */
+function findReceiptCalls(
+  calls: ApiCallLogEntry[],
+  order: OrderLogEntry,
+): ApiCallLogEntry[] {
+  const amountLabel = `$${order.totalPaidByAgent.toFixed(2)}`;
+  const shortId = order.orderId.slice(0, 8);
+  return calls.filter((c) => {
+    if (c.path.includes(order.orderId)) return true;
+    if (c.summary?.includes(`Order ${shortId}`)) return true;
+    if (c.path === "/api/checkout" || c.path.startsWith("/api/checkout")) {
+      return c.summary?.includes(amountLabel) ?? false;
+    }
+    if (c.path.includes("/cards/scoped") || c.path === "/simulate/transactions/authorize") {
+      return c.summary?.includes(amountLabel) ?? false;
+    }
+    return false;
+  });
+}
+
+function ReceiptView({ calls }: { calls: ApiCallLogEntry[] }) {
+  if (calls.length === 0) {
+    return (
+      <p className="px-4 py-3 text-xs text-zinc-400">
+        No matching Rain/Monad calls found for this order.
+      </p>
+    );
+  }
+  return (
+    <div className="border-t border-zinc-100 bg-zinc-50/60 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Receipt
+      </p>
+      <ul className="space-y-1.5 text-xs">
+        {calls.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-baseline gap-x-2 text-zinc-600 dark:text-zinc-400">
+            <span className="whitespace-nowrap text-zinc-400">
+              {new Date(c.timestamp).toLocaleTimeString()}
+            </span>
+            <span
+              className={
+                "rounded-full px-1.5 py-0.5 text-[10px] font-medium " +
+                (c.success
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300")
+              }
+            >
+              {c.success ? "OK" : "FAILED"}
+            </span>
+            <span className="font-mono text-[11px] text-zinc-500">{c.path}</span>
+            <span>{c.error ?? c.summary ?? ""}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function CallLogPanel({
   title,
   calls,
@@ -289,6 +351,7 @@ export function DevDashboard() {
   const [metrics, setMetrics] = useState<DevMetrics | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [now, setNow] = useState(() => Date.now());
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -472,12 +535,13 @@ export function DevDashboard() {
               <th className="px-4 py-2">Agent Paid</th>
               <th className="px-4 py-2">User Charged</th>
               <th className="px-4 py-2">Profit</th>
+              <th className="px-4 py-2">Receipt</th>
             </tr>
           </thead>
           <tbody>
             {(metrics?.orders ?? []).length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-zinc-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-zinc-400">
                   No completed orders yet — buy something in the marketplace to see
                   profit show up here.
                 </td>
@@ -485,27 +549,46 @@ export function DevDashboard() {
             )}
             {(metrics?.orders ?? []).map((order) => {
               const isNew = now - new Date(order.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+              const isExpanded = expandedOrderId === order.orderId;
               return (
-                <tr
-                  key={order.id}
-                  className={
-                    "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
-                    (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
-                  }
-                >
-                  <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
-                    {new Date(order.timestamp).toLocaleTimeString()}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{order.orderId}</td>
-                  <td className="px-4 py-2">
-                    {order.retailer} / {order.carrier}
-                  </td>
-                  <td className="px-4 py-2">${order.totalPaidByAgent.toFixed(2)}</td>
-                  <td className="px-4 py-2">${order.totalChargedToUser.toFixed(2)}</td>
-                  <td className="px-4 py-2 font-medium text-emerald-600 dark:text-emerald-400">
-                    +${order.profit.toFixed(2)}
-                  </td>
-                </tr>
+                <Fragment key={order.id}>
+                  <tr
+                    className={
+                      "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                      (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                    }
+                  >
+                    <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
+                      {new Date(order.timestamp).toLocaleTimeString()}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">{order.orderId}</td>
+                    <td className="px-4 py-2">
+                      {order.retailer} / {order.carrier}
+                    </td>
+                    <td className="px-4 py-2">${order.totalPaidByAgent.toFixed(2)}</td>
+                    <td className="px-4 py-2">${order.totalChargedToUser.toFixed(2)}</td>
+                    <td className="px-4 py-2 font-medium text-emerald-600 dark:text-emerald-400">
+                      +${order.profit.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() =>
+                          setExpandedOrderId(isExpanded ? null : order.orderId)
+                        }
+                        className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-medium hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      >
+                        {isExpanded ? "Hide" : "View"}
+                      </button>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={7} className="p-0">
+                        <ReceiptView calls={findReceiptCalls(metrics?.calls ?? [], order)} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

@@ -33,7 +33,7 @@ export const PRODUCTS: Product[] = [
   {
     id: "toothpaste-travel",
     name: "Travel-Size Toothpaste",
-    imageUrl: productImage("1643379856186-9b09d83a3e62"),
+    imageUrl: "/products/toothpaste.jpg",
     unitQuantity: 1,
   },
   {

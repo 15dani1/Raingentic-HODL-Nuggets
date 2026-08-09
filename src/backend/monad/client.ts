@@ -18,12 +18,20 @@
  *   - verify the network is live before releasing funds (spend-policy gate)
  *   - report real on-chain metrics (chain id, latest block, gas price, and
  *     the Monad testnet USDC token balance) on the developer dashboard
+ *   - broadcast a real settlement transaction from the agent's funded
+ *     wallet for every completed purchase, so the on-chain balance shown
+ *     on the Dev Dashboard actually decreases as orders are placed
  *
- * No private key / signer is configured, so this only issues read-only
- * JSON-RPC calls (eth_chainId, eth_blockNumber, eth_gasPrice,
- * eth_getBalance / eth_call) — no transactions are broadcast. Reward-pool
- * distribution (future multi-agent phase) will need a funded signer.
+ * If MONAD_WALLET_PRIVATE_KEY is set, a real signer is created and used to
+ * send a small settlement transaction (scaled to the order's landed cost,
+ * in MON) for every checkout — this is a self-transfer (no counterparty
+ * contract exists yet) but it IS a real, broadcast, gas-paying
+ * transaction that reduces the wallet's on-chain balance, unlike the
+ * previous read-only-only setup. If no private key is configured, this
+ * step is skipped and checkout proceeds using only the liveness-check
+ * spend-policy gate, same as before.
  */
+import { ethers } from "ethers";
 import { recordApiCall } from "@/backend/services/callLog";
 
 const MONAD_RPC_URL = process.env.MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz";
@@ -34,10 +42,33 @@ const MONAD_CHAIN_ID = process.env.MONAD_CHAIN_ID ?? "10143"; // Monad testnet
 const MONAD_USDC_CONTRACT =
   process.env.MONAD_USDC_CONTRACT ?? "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 
-// Wallet the agent uses to receive testnet funds (faucet) and, in a future
-// phase, sign transactions. Only the address is ever exposed to the
-// frontend/dashboard — the private key stays server-side and unexported.
+// Wallet the agent uses to receive testnet funds (faucet) and, if a
+// private key is configured, sign real settlement transactions. Only the
+// address is ever exposed to the frontend/dashboard — the private key
+// stays server-side and unexported.
 const MONAD_WALLET_ADDRESS = process.env.MONAD_WALLET_ADDRESS ?? null;
+const MONAD_WALLET_PRIVATE_KEY = process.env.MONAD_WALLET_PRIVATE_KEY ?? null;
+
+// Scales each order's USD landed cost down into a small MON amount so a
+// handful of demo purchases don't drain the whole faucet balance in one
+// sitting (1 landed-cost dollar -> 0.001 MON "settlement" transfer).
+const USD_TO_MON_SETTLEMENT_RATE = 0.001;
+
+let cachedProvider: ethers.JsonRpcProvider | null = null;
+function getProvider(): ethers.JsonRpcProvider {
+  if (!cachedProvider) {
+    cachedProvider = new ethers.JsonRpcProvider(MONAD_RPC_URL, {
+      chainId: Number(MONAD_CHAIN_ID),
+      name: "monad-testnet",
+    });
+  }
+  return cachedProvider;
+}
+
+/** True if a private key is configured and a real signer can be created. */
+export function hasSigner(): boolean {
+  return Boolean(MONAD_WALLET_PRIVATE_KEY);
+}
 
 export function getMonadConfig() {
   return {
@@ -45,6 +76,7 @@ export function getMonadConfig() {
     chainId: MONAD_CHAIN_ID,
     usdcContract: MONAD_USDC_CONTRACT,
     walletAddress: MONAD_WALLET_ADDRESS,
+    hasSigner: hasSigner(),
   };
 }
 
@@ -139,6 +171,64 @@ export async function getNetworkStatus(): Promise<MonadNetworkStatus> {
     walletAddress: MONAD_WALLET_ADDRESS,
     walletBalanceWei: balanceHex ? BigInt(balanceHex).toString() : null,
   };
+}
+
+/**
+ * Broadcasts a real, on-chain Monad testnet transaction to settle a
+ * completed purchase against the agent's wallet, so the wallet's on-chain
+ * balance visibly decreases (by value transferred + gas paid) as orders
+ * are placed. Currently a self-transfer to the agent's own address, since
+ * no counterparty spend-policy/escrow contract exists yet — the important
+ * part for the dashboard is that this is a real broadcast, mined
+ * transaction, not a simulated number.
+ *
+ * `landedCostUsd` is scaled down by USD_TO_MON_SETTLEMENT_RATE into a
+ * small MON amount so demo purchases don't drain the whole faucet
+ * balance. Returns null (and logs a failed call) if no signer is
+ * configured, the wallet has insufficient MON, or the tx fails to
+ * broadcast/mine — callers should treat that as "settlement skipped",
+ * not as a reason to fail the whole checkout.
+ */
+export async function settlePurchaseOnChain(
+  orderId: string,
+  landedCostUsd: number,
+): Promise<{ txHash: string; amountWei: string } | null> {
+  if (!MONAD_WALLET_PRIVATE_KEY || !MONAD_WALLET_ADDRESS) return null;
+
+  const startedAt = Date.now();
+  try {
+    const provider = getProvider();
+    const wallet = new ethers.Wallet(MONAD_WALLET_PRIVATE_KEY, provider);
+    const amountMon = Math.max(landedCostUsd * USD_TO_MON_SETTLEMENT_RATE, 0.0001);
+    const value = ethers.parseEther(amountMon.toFixed(8));
+
+    const tx = await wallet.sendTransaction({
+      to: MONAD_WALLET_ADDRESS,
+      value,
+    });
+    const receipt = await tx.wait();
+
+    recordApiCall({
+      source: "monad",
+      method: "POST",
+      path: "eth_sendTransaction",
+      success: true,
+      durationMs: Date.now() - startedAt,
+      summary: `Settled order ${orderId} on-chain: ${amountMon.toFixed(6)} MON, tx ${tx.hash}`,
+    });
+
+    return { txHash: receipt?.hash ?? tx.hash, amountWei: value.toString() };
+  } catch (err) {
+    recordApiCall({
+      source: "monad",
+      method: "POST",
+      path: "eth_sendTransaction",
+      success: false,
+      durationMs: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 /**

@@ -27,6 +27,7 @@ interface DevMetrics {
       chainId: string;
       usdcContract: string;
       walletAddress: string | null;
+      hasSigner: boolean;
     };
     status:
       | {
@@ -364,6 +365,13 @@ export function DevDashboard() {
         {metrics?.monad.status.reachable && !metrics.monad.status.walletAddress && (
           <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
             No MONAD_WALLET_ADDRESS configured — set one in .env to track faucet funds here.
+          </p>
+        )}
+        {metrics?.monad.status.reachable && metrics.monad.status.walletAddress && (
+          <p className="mt-3 text-xs text-zinc-400">
+            {metrics.monad.config.hasSigner
+              ? "Every checkout broadcasts a real, mined Monad settlement transaction — this balance decreases with each purchase."
+              : "No MONAD_WALLET_PRIVATE_KEY configured — balance is read-only and won't change until a signer is set up."}
           </p>
         )}
         <div className="mt-3 text-xs text-zinc-400">

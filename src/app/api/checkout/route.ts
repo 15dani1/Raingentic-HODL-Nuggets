@@ -23,7 +23,7 @@ import {
   getMarginRate,
 } from "@/backend/services/arbitrageEngine";
 import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
-import { checkSpendPolicy } from "@/backend/monad/client";
+import { checkSpendPolicy, settlePurchaseOnChain } from "@/backend/monad/client";
 import { recordApiCall } from "@/backend/services/callLog";
 import { recordOrder } from "@/backend/services/orderLog";
 import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
@@ -142,6 +142,14 @@ export async function POST(req: NextRequest) {
       totalPaidByAgent: result.totalPaidByAgent,
       totalChargedToUser: result.totalChargedToUser,
     });
+
+    // Broadcast a real on-chain settlement transaction so the agent
+    // wallet's MON balance actually decreases on the Dev Dashboard.
+    // Awaited so it's mined before we respond — settlePurchaseOnChain
+    // never throws (it returns null on failure), so this can't break
+    // checkout even if the wallet has no signer configured or is unfunded.
+    await settlePurchaseOnChain(result.orderId, quote.totalLandedCost);
+
     return NextResponse.json(result);
   } catch (err) {
     console.error("Checkout failed:", err);

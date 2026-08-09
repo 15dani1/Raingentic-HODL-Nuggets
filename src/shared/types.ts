@@ -70,6 +70,12 @@ export interface CheckoutRequest {
   requestedQuantity: number;
   /** Set to true once the user has accepted a QuantityMismatchPrompt. */
   acceptedPackQuantity?: boolean;
+  /**
+   * Max number of days from now the user is willing to wait for delivery.
+   * Slower shipping is often cheaper, so a longer window lets the agent
+   * find a lower price. Omit for no constraint (fastest/cheapest available).
+   */
+  maxDeliveryDays?: number;
 }
 
 export interface CheckoutResult {

@@ -43,14 +43,24 @@ export function getAllLandedCostQuotes(productId: string): LandedCostQuote[] {
  * requested quantity (defaults to 1). Used for the initial marketplace
  * price shown to the user before they click Buy Now — it should never
  * silently assume they want a multi-pack.
+ *
+ * `maxDeliveryDaysFromNow`, if provided, additionally filters out any
+ * quote whose estimated delivery date is later than that many days from
+ * now — letting a user trade a longer wait for a lower price (slower
+ * shipping options are often cheaper).
  */
 export function getCheapestSingleUnitQuote(
   productId: string,
   requestedQuantity: number = 1,
+  maxDeliveryDaysFromNow?: number,
 ): LandedCostQuote | null {
-  const quotes = getAllLandedCostQuotes(productId).filter(
+  let quotes = getAllLandedCostQuotes(productId).filter(
     (q) => q.packQuantity <= requestedQuantity,
   );
+  if (maxDeliveryDaysFromNow !== undefined) {
+    const cutoff = Date.now() + maxDeliveryDaysFromNow * 24 * 60 * 60 * 1000;
+    quotes = quotes.filter((q) => new Date(q.estimatedDelivery).getTime() <= cutoff);
+  }
   if (quotes.length === 0) return null;
   return quotes.reduce((cheapest, quote) =>
     quote.totalLandedCost < cheapest.totalLandedCost ? quote : cheapest,
@@ -62,9 +72,19 @@ export function getCheapestSingleUnitQuote(
  * requested). Only meant to be used during the Buy Now / checkout flow,
  * where the agent is actively searching for the best deal and may need to
  * confirm a quantity mismatch with the user before proceeding.
+ *
+ * `maxDeliveryDaysFromNow`, if provided, filters out quotes whose delivery
+ * date is later than that many days from now.
  */
-export function getCheapestOverallQuote(productId: string): LandedCostQuote | null {
-  const quotes = getAllLandedCostQuotes(productId);
+export function getCheapestOverallQuote(
+  productId: string,
+  maxDeliveryDaysFromNow?: number,
+): LandedCostQuote | null {
+  let quotes = getAllLandedCostQuotes(productId);
+  if (maxDeliveryDaysFromNow !== undefined) {
+    const cutoff = Date.now() + maxDeliveryDaysFromNow * 24 * 60 * 60 * 1000;
+    quotes = quotes.filter((q) => new Date(q.estimatedDelivery).getTime() <= cutoff);
+  }
   if (quotes.length === 0) return null;
   return quotes.reduce((cheapest, quote) =>
     quote.totalLandedCost < cheapest.totalLandedCost ? quote : cheapest,
@@ -80,9 +100,10 @@ export function getCheapestOverallQuote(productId: string): LandedCostQuote | nu
 export function checkQuantityMismatch(
   productId: string,
   requestedQuantity: number,
+  maxDeliveryDaysFromNow?: number,
 ): QuantityMismatchPrompt | null {
   const product = PRODUCTS.find((p) => p.id === productId);
-  const cheapestOverall = getCheapestOverallQuote(productId);
+  const cheapestOverall = getCheapestOverallQuote(productId, maxDeliveryDaysFromNow);
   if (!product || !cheapestOverall) return null;
 
   if (cheapestOverall.packQuantity > requestedQuantity) {
@@ -102,12 +123,15 @@ export function checkQuantityMismatch(
 /**
  * Computes the single marketplace price (landed cost + margin) shown to
  * users on initial page load, based on single-unit-fitting listings only.
+ * `maxDeliveryDays`, if provided, lets the user accept a slower delivery
+ * window in exchange for a potentially lower price.
  */
 export function getMarketplacePrice(
   productId: string,
   marginRate: number = DEFAULT_MARGIN_RATE,
+  maxDeliveryDays?: number,
 ): MarketplacePrice | null {
-  const cheapest = getCheapestSingleUnitQuote(productId, 1);
+  const cheapest = getCheapestSingleUnitQuote(productId, 1, maxDeliveryDays);
   if (!cheapest) return null;
 
   return {

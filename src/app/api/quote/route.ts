@@ -11,11 +11,13 @@ import { getMarketplacePrice } from "@/backend/services/arbitrageEngine";
 
 export async function GET(req: NextRequest) {
   const productId = req.nextUrl.searchParams.get("productId");
+  const maxDeliveryDaysParam = req.nextUrl.searchParams.get("maxDeliveryDays");
+  const maxDeliveryDays = maxDeliveryDaysParam ? Number(maxDeliveryDaysParam) : undefined;
 
   if (!productId || !PRODUCTS.some((p) => p.id === productId)) {
     return NextResponse.json({ error: "Unknown productId" }, { status: 404 });
   }
 
-  const price = getMarketplacePrice(productId);
+  const price = getMarketplacePrice(productId, undefined, maxDeliveryDays);
   return NextResponse.json({ price });
 }

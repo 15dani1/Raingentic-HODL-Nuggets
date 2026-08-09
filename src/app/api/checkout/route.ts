@@ -79,8 +79,9 @@ function completeOrderSimulated(quote: LandedCostQuote): CheckoutResult {
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as CheckoutRequest;
   const requestedQuantity = body.requestedQuantity ?? 1;
+  const maxDeliveryDays = body.maxDeliveryDays;
 
-  const mismatch = checkQuantityMismatch(body.productId, requestedQuantity);
+  const mismatch = checkQuantityMismatch(body.productId, requestedQuantity, maxDeliveryDays);
 
   // Mismatch found and user hasn't answered yet — ask before buying anything.
   if (mismatch && body.acceptedPackQuantity === undefined) {
@@ -101,8 +102,8 @@ export async function POST(req: NextRequest) {
   // User declined the pack — buy the cheapest option that fits their requested quantity.
   const quote =
     mismatch && body.acceptedPackQuantity === false
-      ? getCheapestSingleUnitQuote(body.productId, requestedQuantity)
-      : getCheapestOverallQuote(body.productId);
+      ? getCheapestSingleUnitQuote(body.productId, requestedQuantity, maxDeliveryDays)
+      : getCheapestOverallQuote(body.productId, maxDeliveryDays);
 
   if (!quote) {
     return NextResponse.json({ error: "Unknown productId" }, { status: 404 });

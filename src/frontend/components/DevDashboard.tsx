@@ -3,22 +3,17 @@
  *
  * Shows what's actually happening behind the scenes — every outbound API
  * call (Rain sandbox requests, checkout outcomes), success/failure rates,
- * latency, plus the same per-product pricing/shipping detail as the
- * retailer dashboard, all in one place for debugging and demoing.
+ * latency, profit per order, and Monad testnet status, all in one place
+ * for debugging and demoing. Retailer/shipping pricing detail lives on the
+ * separate Retailer Dashboard (/dashboard) — not duplicated here.
  *
  * Owned by: frontend/UI team (data comes from backend routes below).
  */
 "use client";
 
 import { useEffect, useState } from "react";
-import type { LandedCostQuote, Product } from "@/shared/types";
 import type { ApiCallLogEntry, CallLogStats } from "@/backend/services/callLog";
 import type { OrderLogEntry, ProfitStats } from "@/backend/services/orderLog";
-
-interface DashboardRow {
-  product: Product;
-  quotes: LandedCostQuote[];
-}
 
 interface DevMetrics {
   rainConfigured: boolean;
@@ -141,19 +136,12 @@ function CallLogPanel({
 
 export function DevDashboard() {
   const [metrics, setMetrics] = useState<DevMetrics | null>(null);
-  const [rows, setRows] = useState<DashboardRow[]>([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => setRows(data.data ?? []));
   }, []);
 
   useEffect(() => {
@@ -191,8 +179,9 @@ export function DevDashboard() {
       </div>
       <p className="mb-8 text-zinc-500">
         Behind-the-scenes engineering view: every outbound API call (Rain sandbox +
-        Monad testnet RPC), success/failure rates, and per-product pricing/shipping
-        data. Not visible from the marketplace.
+        Monad testnet RPC), success/failure rates, and per-order profit. Not visible
+        from the marketplace. For retailer pricing/shipping data, see the Retailer
+        Dashboard.
       </p>
 
       {/* Rain integration status */}
@@ -366,49 +355,6 @@ export function DevDashboard() {
           emptyMessage="No Monad calls yet."
           now={now}
         />
-      </div>
-
-      {/* Pricing / shipping detail, same data as the retailer dashboard */}
-      <h2 className="mb-3 text-lg font-semibold">Pricing &amp; Shipping by Product</h2>
-      <p className="mb-6 text-zinc-500">
-        Every mocked retailer/carrier combination the arbitrage engine considers.
-      </p>
-      <div className="flex flex-col gap-10">
-        {rows.map(({ product, quotes }) => (
-          <div key={product.id}>
-            <h3 className="mb-3 text-base font-semibold">{product.name}</h3>
-            <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
-                  <tr>
-                    <th className="px-4 py-2">Retailer</th>
-                    <th className="px-4 py-2">Pack Qty</th>
-                    <th className="px-4 py-2">Product Price</th>
-                    <th className="px-4 py-2">Carrier</th>
-                    <th className="px-4 py-2">Shipping</th>
-                    <th className="px-4 py-2">Total Landed Cost</th>
-                    <th className="px-4 py-2">Est. Delivery</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quotes.map((quote, i) => (
-                    <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800">
-                      <td className="px-4 py-2">{quote.retailer}</td>
-                      <td className="px-4 py-2">{quote.packQuantity}</td>
-                      <td className="px-4 py-2">${quote.productPrice.toFixed(2)}</td>
-                      <td className="px-4 py-2">{quote.carrier}</td>
-                      <td className="px-4 py-2">${quote.shippingCost.toFixed(2)}</td>
-                      <td className="px-4 py-2 font-medium">
-                        ${quote.totalLandedCost.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2">{quote.estimatedDelivery}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

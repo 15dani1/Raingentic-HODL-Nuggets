@@ -13,6 +13,7 @@ interface ProductCardProps {
 
 async function submitCheckout(
   productId: string,
+  maxDeliveryDays: number,
   acceptedPackQuantity?: boolean,
 ): Promise<CheckoutResult> {
   const res = await fetch("/api/checkout", {
@@ -21,11 +22,17 @@ async function submitCheckout(
     body: JSON.stringify({
       productId,
       requestedQuantity: 1,
+      maxDeliveryDays,
       ...(acceptedPackQuantity === undefined ? {} : { acceptedPackQuantity }),
     }),
   });
   return res.json();
 }
+
+// Range of the "willing to wait" slider, in days from today. Min is the
+// fastest option we'd realistically offer; max covers even the slowest
+// shipping option in the mock retailer data.
+const MAX_DELIVERY_DAYS_RANGE: [min: number, max: number] = [2, 10];
 
 // Narrates what the agent is doing in real time, purely for demo purposes —
 // these steps mirror the real backend flow in /api/checkout (arbitrage
@@ -74,11 +81,15 @@ export function ProductCard({ product }: ProductCardProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [stepIndex, setStepIndex] = useState(-1);
   const [order, setOrder] = useState<CheckoutResult | null>(null);
+  // How many days the user is willing to wait for delivery — a longer
+  // window unlocks slower (often cheaper) shipping options, letting the
+  // agent find a better price. Defaults to the fastest available option.
+  const [maxDeliveryDays, setMaxDeliveryDays] = useState(MAX_DELIVERY_DAYS_RANGE[0]);
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/quote?productId=${product.id}`)
+    fetch(`/api/quote?productId=${product.id}&maxDeliveryDays=${maxDeliveryDays}`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
@@ -91,7 +102,7 @@ export function ProductCard({ product }: ProductCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [product.id]);
+  }, [product.id, maxDeliveryDays]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -121,7 +132,10 @@ export function ProductCard({ product }: ProductCardProps) {
     setStatus(null);
     setStepIndex(0);
 
-    const [result] = await Promise.all([submitCheckout(product.id), playDemoSteps()]);
+    const [result] = await Promise.all([
+      submitCheckout(product.id, maxDeliveryDays),
+      playDemoSteps(),
+    ]);
 
     if (result.status === "needs_confirmation" && result.quantityMismatch) {
       setMismatch(result.quantityMismatch);
@@ -139,7 +153,7 @@ export function ProductCard({ product }: ProductCardProps) {
     setStepIndex(0);
 
     const [result] = await Promise.all([
-      submitCheckout(product.id, accept),
+      submitCheckout(product.id, maxDeliveryDays, accept),
       playDemoSteps(),
     ]);
     finishOrder(result);
@@ -185,21 +199,47 @@ export function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between text-xs text-zinc-500">
+            <label htmlFor={`delivery-${product.id}`}>Willing to wait</label>
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {maxDeliveryDays} {maxDeliveryDays === 1 ? "day" : "days"}
+            </span>
+          </div>
+          <input
+            id={`delivery-${product.id}`}
+            type="range"
+            min={MAX_DELIVERY_DAYS_RANGE[0]}
+            max={MAX_DELIVERY_DAYS_RANGE[1]}
+            step={1}
+            value={maxDeliveryDays}
+            onChange={(e) => {
+              setMaxDeliveryDays(Number(e.target.value));
+              setLoadingPrice(true);
+            }}
+            disabled={buying}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-zinc-200 accent-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800"
+          />
+          <p className="text-[11px] text-zinc-400">
+            A longer window unlocks slower shipping options, which are often cheaper.
+          </p>
+        </div>
+
         {mismatch && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/60 dark:text-amber-200">
-            <p className="mb-2 leading-relaxed">{mismatch.message}</p>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/60 dark:text-amber-200">
+            <p className="mb-3 text-sm leading-relaxed font-medium">{mismatch.message}</p>
             <div className="flex gap-2">
               <button
                 onClick={() => respondToMismatch(true)}
                 disabled={buying}
-                className="rounded-full bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
+                className="rounded-full bg-amber-900 px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
               >
                 Buy the pack
               </button>
               <button
                 onClick={() => respondToMismatch(false)}
                 disabled={buying}
-                className="rounded-full border border-amber-300 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900/40"
+                className="rounded-full border border-amber-300 px-4 py-2 text-sm font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900/40"
               >
                 Just 1
               </button>

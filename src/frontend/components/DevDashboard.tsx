@@ -64,6 +64,81 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
+function CallLogPanel({
+  title,
+  calls,
+  emptyMessage,
+  now,
+}: {
+  title: string;
+  calls: ApiCallLogEntry[];
+  emptyMessage: string;
+  now: number;
+}) {
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-zinc-600 dark:text-zinc-400">
+        {title} <span className="font-normal text-zinc-400">({calls.length})</span>
+      </h3>
+      <div className="max-h-96 overflow-y-auto overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="sticky top-0 bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
+            <tr>
+              <th className="px-3 py-2">Time</th>
+              <th className="px-3 py-2">Method</th>
+              <th className="px-3 py-2">Path</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Duration</th>
+              <th className="px-3 py-2">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {calls.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-3 py-6 text-center text-zinc-400">
+                  {emptyMessage}
+                </td>
+              </tr>
+            )}
+            {calls.map((call) => {
+              const isNew = now - new Date(call.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+              return (
+                <tr
+                  key={call.id}
+                  className={
+                    "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                    (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                  }
+                >
+                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
+                    {new Date(call.timestamp).toLocaleTimeString()}
+                  </td>
+                  <td className="px-3 py-2">{call.method}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{call.path}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={
+                        "rounded-full px-2 py-0.5 text-xs font-medium " +
+                        (call.success
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300")
+                      }
+                    >
+                      {call.success ? `OK${call.statusCode ? ` ${call.statusCode}` : ""}` : "FAILED"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">{call.durationMs}ms</td>
+                  <td className="px-3 py-2 text-zinc-500">{call.error ?? call.summary ?? ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function DevDashboard() {
   const [metrics, setMetrics] = useState<DevMetrics | null>(null);
   const [rows, setRows] = useState<DashboardRow[]>([]);
@@ -275,78 +350,22 @@ export function DevDashboard() {
         </table>
       </div>
 
-      {/* Call log */}
+      {/* Call log — split into two panels so Rain/checkout calls aren't
+          drowned out by the much higher volume of Monad RPC calls. */}
       <h2 className="mb-3 text-lg font-semibold">Recent API Calls</h2>
-      <div className="mb-14 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
-            <tr>
-              <th className="px-4 py-2">Time</th>
-              <th className="px-4 py-2">Source</th>
-              <th className="px-4 py-2">Method</th>
-              <th className="px-4 py-2">Path</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Duration</th>
-              <th className="px-4 py-2">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(metrics?.calls ?? []).length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-zinc-400">
-                  No API calls yet — browse the marketplace and click Buy Now to generate
-                  some.
-                </td>
-              </tr>
-            )}
-            {(metrics?.calls ?? []).map((call) => {
-              const isNew = now - new Date(call.timestamp).getTime() < NEW_CALL_WINDOW_MS;
-              return (
-                <tr
-                  key={call.id}
-                  className={
-                    "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
-                    (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
-                  }
-                >
-                <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
-                  {new Date(call.timestamp).toLocaleTimeString()}
-                </td>
-                <td className="px-4 py-2">
-                  <span
-                    className={
-                      "rounded-full px-2 py-0.5 text-xs font-medium " +
-                      (call.source === "monad"
-                        ? "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
-                        : call.source === "rain"
-                          ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
-                          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300")
-                    }
-                  >
-                    {call.source}
-                  </span>
-                </td>
-                <td className="px-4 py-2">{call.method}</td>
-                <td className="px-4 py-2 font-mono text-xs">{call.path}</td>
-                <td className="px-4 py-2">
-                  <span
-                    className={
-                      "rounded-full px-2 py-0.5 text-xs font-medium " +
-                      (call.success
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                        : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300")
-                    }
-                  >
-                    {call.success ? `OK${call.statusCode ? ` ${call.statusCode}` : ""}` : "FAILED"}
-                  </span>
-                </td>
-                <td className="px-4 py-2 whitespace-nowrap">{call.durationMs}ms</td>
-                <td className="px-4 py-2 text-zinc-500">{call.error ?? call.summary ?? ""}</td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="mb-14 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <CallLogPanel
+          title="Rain & Checkout"
+          calls={(metrics?.calls ?? []).filter((c) => c.source !== "monad")}
+          emptyMessage="No Rain/checkout calls yet — browse the marketplace and click Buy Now to generate some."
+          now={now}
+        />
+        <CallLogPanel
+          title="Monad"
+          calls={(metrics?.calls ?? []).filter((c) => c.source === "monad")}
+          emptyMessage="No Monad calls yet."
+          now={now}
+        />
       </div>
 
       {/* Pricing / shipping detail, same data as the retailer dashboard */}

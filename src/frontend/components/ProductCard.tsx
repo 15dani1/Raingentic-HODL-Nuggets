@@ -94,6 +94,7 @@ export function ProductCard({ product }: ProductCardProps) {
   }, [product.id]);
 
   useEffect(() => {
+    cancelledRef.current = false;
     return () => {
       cancelledRef.current = true;
     };
@@ -104,8 +105,14 @@ export function ProductCard({ product }: ProductCardProps) {
     for (let i = 0; i < DEMO_STEPS.length; i++) {
       if (cancelledRef.current) return;
       setStepIndex(i);
+      // Yield to the browser so it actually paints the "active" step before
+      // moving on to the next one.
       await new Promise((resolve) => setTimeout(resolve, DEMO_STEPS[i].ms));
+      if (cancelledRef.current) return;
     }
+    // Hold on the last step briefly so it's visibly reached, rather than
+    // jumping straight from step 1 to "confirmed".
+    setStepIndex(DEMO_STEPS.length - 1);
   }
 
   async function handleBuy() {

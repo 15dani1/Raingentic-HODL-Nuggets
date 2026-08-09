@@ -34,11 +34,17 @@ const MONAD_CHAIN_ID = process.env.MONAD_CHAIN_ID ?? "10143"; // Monad testnet
 const MONAD_USDC_CONTRACT =
   process.env.MONAD_USDC_CONTRACT ?? "0x534b2f3A21130d7a60830c2Df862319e593943A3";
 
+// Wallet the agent uses to receive testnet funds (faucet) and, in a future
+// phase, sign transactions. Only the address is ever exposed to the
+// frontend/dashboard — the private key stays server-side and unexported.
+const MONAD_WALLET_ADDRESS = process.env.MONAD_WALLET_ADDRESS ?? null;
+
 export function getMonadConfig() {
   return {
     rpcUrl: MONAD_RPC_URL,
     chainId: MONAD_CHAIN_ID,
     usdcContract: MONAD_USDC_CONTRACT,
+    walletAddress: MONAD_WALLET_ADDRESS,
   };
 }
 
@@ -102,19 +108,26 @@ export interface MonadNetworkStatus {
   gasPriceWei: string;
   usdcContract: string;
   reachable: boolean;
+  walletAddress: string | null;
+  walletBalanceWei: string | null;
 }
 
 /**
  * Reads real, current network status from Monad testnet: chain id, latest
- * block number, and current gas price. Used to power the "Monad" panel on
+ * block number, current gas price, and (if MONAD_WALLET_ADDRESS is set)
+ * the native MON balance of the agent's wallet — so you can confirm
+ * faucet funds have actually landed. Used to power the "Monad" panel on
  * the developer dashboard and as the network-liveness check behind
  * checkSpendPolicy.
  */
 export async function getNetworkStatus(): Promise<MonadNetworkStatus> {
-  const [chainIdHex, blockHex, gasPriceHex] = await Promise.all([
+  const [chainIdHex, blockHex, gasPriceHex, balanceHex] = await Promise.all([
     rpcCall<string>("eth_chainId"),
     rpcCall<string>("eth_blockNumber"),
     rpcCall<string>("eth_gasPrice"),
+    MONAD_WALLET_ADDRESS
+      ? rpcCall<string>("eth_getBalance", [MONAD_WALLET_ADDRESS, "latest"])
+      : Promise.resolve(null),
   ]);
 
   return {
@@ -123,6 +136,8 @@ export async function getNetworkStatus(): Promise<MonadNetworkStatus> {
     gasPriceWei: BigInt(gasPriceHex).toString(),
     usdcContract: MONAD_USDC_CONTRACT,
     reachable: true,
+    walletAddress: MONAD_WALLET_ADDRESS,
+    walletBalanceWei: balanceHex ? BigInt(balanceHex).toString() : null,
   };
 }
 

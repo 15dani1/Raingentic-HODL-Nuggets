@@ -22,7 +22,12 @@ interface DevMetrics {
   profit: ProfitStats;
   orders: OrderLogEntry[];
   monad: {
-    config: { rpcUrl: string; chainId: string; usdcContract: string };
+    config: {
+      rpcUrl: string;
+      chainId: string;
+      usdcContract: string;
+      walletAddress: string | null;
+    };
     status:
       | {
           chainId: number;
@@ -30,6 +35,8 @@ interface DevMetrics {
           gasPriceWei: string;
           usdcContract: string;
           reachable: true;
+          walletAddress: string | null;
+          walletBalanceWei: string | null;
         }
       | { reachable: false; error: string };
   };
@@ -327,7 +334,37 @@ export function DevDashboard() {
                 {metrics.monad.status.usdcContract}
               </div>
             </div>
+            {metrics.monad.status.walletAddress && (
+              <>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">
+                    Agent Wallet
+                  </div>
+                  <div
+                    className="mt-0.5 truncate font-mono text-xs"
+                    title={metrics.monad.status.walletAddress}
+                  >
+                    {metrics.monad.status.walletAddress}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">
+                    Wallet Balance (MON)
+                  </div>
+                  <div className="mt-0.5 font-mono">
+                    {metrics.monad.status.walletBalanceWei
+                      ? (Number(metrics.monad.status.walletBalanceWei) / 1e18).toFixed(4)
+                      : "0.0000"}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
+        )}
+        {metrics?.monad.status.reachable && !metrics.monad.status.walletAddress && (
+          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+            No MONAD_WALLET_ADDRESS configured — set one in .env to track faucet funds here.
+          </p>
         )}
         <div className="mt-3 text-xs text-zinc-400">
           RPC: {metrics?.monad.config.rpcUrl ?? "…"}

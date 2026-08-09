@@ -59,6 +59,92 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
+/** Turns a Rain API path into a short, human-readable transaction type label. */
+function rainTransactionType(path: string): string {
+  if (path.includes("checkout")) return "Checkout";
+  if (path.includes("cards/scoped")) return "Card issuance";
+  if (path.includes("authorize")) return "Authorization";
+  if (path.includes("settle")) return "Settlement";
+  if (path.includes("collateral/fund")) return "Collateral funding";
+  if (path.includes("transactions")) return "Transaction lookup";
+  if (path.includes("payment-routes")) return "Payment routing";
+  return "Other";
+}
+
+function RainCallLogTable({ calls, now }: { calls: ApiCallLogEntry[]; now: number }) {
+  return (
+    <div className="mb-14 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
+          <tr>
+            <th className="px-4 py-2">Time</th>
+            <th className="px-4 py-2">Type</th>
+            <th className="px-4 py-2">Method</th>
+            <th className="px-4 py-2">Path</th>
+            <th className="px-4 py-2">Status</th>
+            <th className="px-4 py-2">Duration</th>
+            <th className="px-4 py-2">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {calls.length === 0 && (
+            <tr>
+              <td colSpan={7} className="px-4 py-6 text-center text-zinc-400">
+                No Rain/checkout calls yet — browse the marketplace and click Buy Now to
+                generate some.
+              </td>
+            </tr>
+          )}
+          {calls.map((call) => {
+            const isNew = now - new Date(call.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+            return (
+              <tr
+                key={call.id}
+                className={
+                  "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                  (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                }
+              >
+                <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
+                  {new Date(call.timestamp).toLocaleTimeString()}
+                </td>
+                <td className="px-4 py-2">
+                  <span
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (call.source === "checkout"
+                        ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                        : "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300")
+                    }
+                  >
+                    {rainTransactionType(call.path)}
+                  </span>
+                </td>
+                <td className="px-4 py-2">{call.method}</td>
+                <td className="px-4 py-2 font-mono text-xs">{call.path}</td>
+                <td className="px-4 py-2">
+                  <span
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (call.success
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300")
+                    }
+                  >
+                    {call.success ? `OK${call.statusCode ? ` ${call.statusCode}` : ""}` : "FAILED"}
+                  </span>
+                </td>
+                <td className="px-4 py-2 whitespace-nowrap">{call.durationMs}ms</td>
+                <td className="px-4 py-2 text-zinc-500">{call.error ?? call.summary ?? ""}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function CallLogPanel({
   title,
   calls,
@@ -248,22 +334,7 @@ export function DevDashboard() {
         </div>
       </div>
 
-      {/* Aggregate stats */}
-      <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <StatCard label="Total Calls" value={String(stats?.totalCalls ?? 0)} />
-        <StatCard label="Succeeded" value={String(stats?.successCount ?? 0)} tone="good" />
-        <StatCard label="Failed" value={String(stats?.failureCount ?? 0)} tone="bad" />
-        <StatCard
-          label="Success Rate"
-          value={stats ? `${(stats.successRate * 100).toFixed(0)}%` : "—"}
-        />
-        <StatCard
-          label="Avg Latency"
-          value={stats ? `${stats.avgDurationMs.toFixed(0)}ms` : "—"}
-        />
-      </div>
-
-      {/* Profit */}
+      {/* Profit — the number that matters most, shown first. */}
       <h2 className="mb-3 text-lg font-semibold">Profit</h2>
       <p className="mb-4 text-zinc-500">
         The spread between what the agent actually paid the retailer (product +
@@ -339,9 +410,32 @@ export function DevDashboard() {
         </table>
       </div>
 
-      {/* Call log — split into two panels so Rain/checkout calls aren't
-          drowned out by the much higher volume of Monad RPC calls. */}
-      <h2 className="mb-3 text-lg font-semibold">Recent API Calls</h2>
+      {/* Rain call log — full detail, not height-constrained, since Rain
+          calls are the ones the user actually cares about inspecting. */}
+      <h2 className="mb-3 text-lg font-semibold">Rain API Calls</h2>
+      <p className="mb-4 text-zinc-500">
+        Every Rain sandbox request the agent made (card issuance, authorization,
+        settlement), with the transaction type, status, and timing.
+      </p>
+      <RainCallLogTable calls={(metrics?.calls ?? []).filter((c) => c.source !== "monad")} now={now} />
+
+      {/* Aggregate call stats — pushed to the bottom since raw call volume
+          (dominated by frequent Monad RPC polling) is less meaningful than
+          profit or the Rain call detail above. */}
+      <h2 className="mb-3 mt-14 text-lg font-semibold">All API Call Volume</h2>
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-5">
+        <StatCard label="Total Calls" value={String(stats?.totalCalls ?? 0)} />
+        <StatCard label="Succeeded" value={String(stats?.successCount ?? 0)} tone="good" />
+        <StatCard label="Failed" value={String(stats?.failureCount ?? 0)} tone="bad" />
+        <StatCard
+          label="Success Rate"
+          value={stats ? `${(stats.successRate * 100).toFixed(0)}%` : "—"}
+        />
+        <StatCard
+          label="Avg Latency"
+          value={stats ? `${stats.avgDurationMs.toFixed(0)}ms` : "—"}
+        />
+      </div>
       <div className="mb-14 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <CallLogPanel
           title="Rain & Checkout"

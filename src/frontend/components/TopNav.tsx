@@ -22,8 +22,10 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-10 border-b border-zinc-200 bg-background/80 backdrop-blur dark:border-zinc-800">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="text-lg">🐐</span>
+        <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-xs font-bold text-background">
+            RH
+          </span>
           Raingentic HODL Nuggets
         </Link>
         <nav className="flex gap-1">

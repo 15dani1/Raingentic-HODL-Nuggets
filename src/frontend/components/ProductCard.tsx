@@ -32,12 +32,38 @@ async function submitCheckout(
 // search -> Monad spend-policy check -> Rain scoped card -> authorize ->
 // settle), staged with short delays so a human audience can follow along.
 const DEMO_STEPS = [
-  { label: "Searching every retailer & pack size...", ms: 500 },
-  { label: "Checking Monad testnet is live...", ms: 550 },
-  { label: "Issuing a scoped Rain card...", ms: 650 },
-  { label: "Authorizing the charge...", ms: 500 },
-  { label: "Settling the transaction...", ms: 500 },
+  { label: "Searching every retailer & pack size", ms: 500 },
+  { label: "Checking Monad testnet is live", ms: 550 },
+  { label: "Issuing a scoped Rain card", ms: 650 },
+  { label: "Authorizing the charge", ms: 500 },
+  { label: "Settling the transaction", ms: 500 },
 ];
+
+function StepIcon({ state }: { state: "done" | "active" | "pending" }) {
+  if (state === "done") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0 text-emerald-500">
+        <circle cx="8" cy="8" r="8" className="fill-current opacity-15" />
+        <path
+          d="M4.5 8.2l2.2 2.2 4.8-4.8"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (state === "active") {
+    return (
+      <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        <span className="absolute h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />
+        <span className="relative h-2 w-2 rounded-full bg-sky-500" />
+      </span>
+    );
+  }
+  return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-700" />;
+}
 
 export function ProductCard({ product }: ProductCardProps) {
   const [price, setPrice] = useState<number | null>(null);
@@ -117,97 +143,108 @@ export function ProductCard({ product }: ProductCardProps) {
     setOrder(result);
     setStatus(
       result.status === "confirmed"
-        ? `Order confirmed! Arriving ${result.estimatedDelivery}.`
-        : "Something went wrong.",
+        ? `Confirmed — arriving ${result.estimatedDelivery}`
+        : "Something went wrong. Please try again.",
     );
     setBuying(false);
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 p-5 shadow-sm dark:border-zinc-800">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={product.imageUrl}
-        alt={product.name}
-        className="aspect-square w-full rounded-xl bg-zinc-100 object-cover dark:bg-zinc-900"
-      />
-      <h3 className="text-base font-semibold">{product.name}</h3>
+    <div className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="aspect-square w-full overflow-hidden bg-zinc-50 dark:bg-zinc-900">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={product.imageUrl}
+          alt={product.name}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        />
+      </div>
 
-      {loadingPrice ? (
-        <p className="text-sm text-zinc-400">Loading price...</p>
-      ) : price === null ? (
-        <p className="text-sm text-zinc-400">Price unavailable</p>
-      ) : (
-        <>
-          <p className="text-2xl font-semibold">${price.toFixed(2)}</p>
-          {delivery && (
-            <p className="text-sm text-zinc-500">Estimated delivery: {delivery}</p>
+      <div className="flex flex-1 flex-col gap-3 p-5">
+        <h3 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          {product.name}
+        </h3>
+
+        <div className="flex items-baseline justify-between">
+          {loadingPrice ? (
+            <div className="h-7 w-16 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+          ) : price === null ? (
+            <p className="text-sm text-zinc-400">Price unavailable</p>
+          ) : (
+            <p className="text-2xl font-semibold tracking-tight">${price.toFixed(2)}</p>
           )}
-        </>
-      )}
-
-      {mismatch && (
-        <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <p className="mb-2">{mismatch.message}</p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => respondToMismatch(true)}
-              disabled={buying}
-              className="rounded-full bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
-            >
-              Buy the pack
-            </button>
-            <button
-              onClick={() => respondToMismatch(false)}
-              disabled={buying}
-              className="rounded-full border border-amber-800 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-200 dark:hover:bg-amber-900"
-            >
-              No, just 1
-            </button>
-          </div>
+          {delivery && !loadingPrice && (
+            <p className="text-xs text-zinc-400">Arrives {delivery}</p>
+          )}
         </div>
-      )}
 
-      {!mismatch && (
-        <button
-          onClick={handleBuy}
-          disabled={buying || price === null}
-          className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
-        >
-          {buying ? "Working..." : "Buy now"}
-        </button>
-      )}
+        {mismatch && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/60 dark:text-amber-200">
+            <p className="mb-2 leading-relaxed">{mismatch.message}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => respondToMismatch(true)}
+                disabled={buying}
+                className="rounded-full bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
+              >
+                Buy the pack
+              </button>
+              <button
+                onClick={() => respondToMismatch(false)}
+                disabled={buying}
+                className="rounded-full border border-amber-300 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900/40"
+              >
+                Just 1
+              </button>
+            </div>
+          </div>
+        )}
 
-      {stepIndex >= 0 && (
-        <ul className="flex flex-col gap-1 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
-          {DEMO_STEPS.map((step, i) => (
-            <li
-              key={step.label}
-              className={
-                "flex items-center gap-2 transition-opacity " +
-                (i > stepIndex ? "opacity-30" : "opacity-100")
-              }
-            >
-              <span>
-                {i < stepIndex ? "✅" : i === stepIndex ? "⏳" : "◯"}
-              </span>
-              {step.label}
-            </li>
-          ))}
-        </ul>
-      )}
+        {!mismatch && (
+          <button
+            onClick={handleBuy}
+            disabled={buying || price === null}
+            className="mt-auto rounded-full bg-foreground py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {buying ? "Processing…" : "Buy now"}
+          </button>
+        )}
 
-      {status && <p className="text-sm text-zinc-500">{status}</p>}
+        {stepIndex >= 0 && (
+          <ul className="flex flex-col gap-1.5 rounded-lg border border-zinc-100 bg-zinc-50 p-3 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            {DEMO_STEPS.map((step, i) => (
+              <li key={step.label} className="flex items-center gap-2">
+                <StepIcon state={i < stepIndex ? "done" : i === stepIndex ? "active" : "pending"} />
+                <span className={i === stepIndex ? "text-zinc-700 dark:text-zinc-200" : ""}>
+                  {step.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {order?.status === "confirmed" && (
-        <a
-          href="/dev"
-          className="text-xs font-medium text-emerald-600 underline underline-offset-2 hover:text-emerald-700 dark:text-emerald-400"
-        >
-          See this order&apos;s API calls on the dev dashboard →
-        </a>
-      )}
+        {status && (
+          <p
+            className={
+              "text-xs " +
+              (order?.status === "confirmed"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-red-500")
+            }
+          >
+            {status}
+          </p>
+        )}
+
+        {order?.status === "confirmed" && (
+          <a
+            href="/dev"
+            className="text-xs font-medium text-zinc-400 underline underline-offset-2 hover:text-zinc-600 dark:hover:text-zinc-200"
+          >
+            View this order in the dev dashboard →
+          </a>
+        )}
+      </div>
     </div>
   );
 }
-

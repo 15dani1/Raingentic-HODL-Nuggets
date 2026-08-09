@@ -24,6 +24,7 @@ import {
 import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
 import { checkSpendPolicy } from "@/backend/monad/client";
 import { recordApiCall } from "@/backend/services/callLog";
+import { recordOrder } from "@/backend/services/orderLog";
 import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
 
 const MARGIN_RATE = 1.12;
@@ -126,6 +127,14 @@ export async function POST(req: NextRequest) {
       success: true,
       durationMs: Date.now() - startedAt,
       summary: `${isRainConfigured() ? "Rain" : "simulated"} order via ${quote.retailer}/${quote.carrier} — $${quote.totalLandedCost.toFixed(2)}`,
+    });
+    recordOrder({
+      orderId: result.orderId,
+      productId: result.productId,
+      retailer: result.retailer,
+      carrier: result.carrier,
+      totalPaidByAgent: result.totalPaidByAgent,
+      totalChargedToUser: result.totalChargedToUser,
     });
     return NextResponse.json(result);
   } catch (err) {

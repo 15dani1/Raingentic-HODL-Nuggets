@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { LandedCostQuote, Product } from "@/shared/types";
 import type { ApiCallLogEntry, CallLogStats } from "@/backend/services/callLog";
+import type { OrderLogEntry, ProfitStats } from "@/backend/services/orderLog";
 
 interface DashboardRow {
   product: Product;
@@ -23,6 +24,8 @@ interface DevMetrics {
   rainConfigured: boolean;
   stats: CallLogStats;
   calls: ApiCallLogEntry[];
+  profit: ProfitStats;
+  orders: OrderLogEntry[];
   monad: {
     config: { rpcUrl: string; chainId: string; usdcContract: string };
     status:
@@ -194,6 +197,82 @@ export function DevDashboard() {
           label="Avg Latency"
           value={stats ? `${stats.avgDurationMs.toFixed(0)}ms` : "—"}
         />
+      </div>
+
+      {/* Profit */}
+      <h2 className="mb-3 text-lg font-semibold">Profit</h2>
+      <p className="mb-4 text-zinc-500">
+        The spread between what the agent actually paid the retailer (product +
+        shipping, via Rain) and what the user was charged, for every completed order.
+      </p>
+      <div className="mb-10 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard
+          label="Total Profit"
+          value={metrics ? `$${metrics.profit.totalProfit.toFixed(2)}` : "—"}
+          tone="good"
+        />
+        <StatCard
+          label="Avg Profit / Order"
+          value={metrics ? `$${metrics.profit.avgProfit.toFixed(2)}` : "—"}
+        />
+        <StatCard label="Orders" value={String(metrics?.profit.totalOrders ?? 0)} />
+        <StatCard
+          label="Revenue vs. Cost"
+          value={
+            metrics
+              ? `$${metrics.profit.totalRevenue.toFixed(2)} / $${metrics.profit.totalCost.toFixed(2)}`
+              : "—"
+          }
+        />
+      </div>
+      <div className="mb-14 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-900">
+            <tr>
+              <th className="px-4 py-2">Time</th>
+              <th className="px-4 py-2">Order</th>
+              <th className="px-4 py-2">Retailer / Carrier</th>
+              <th className="px-4 py-2">Agent Paid</th>
+              <th className="px-4 py-2">User Charged</th>
+              <th className="px-4 py-2">Profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(metrics?.orders ?? []).length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-zinc-400">
+                  No completed orders yet — buy something in the marketplace to see
+                  profit show up here.
+                </td>
+              </tr>
+            )}
+            {(metrics?.orders ?? []).map((order) => {
+              const isNew = now - new Date(order.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+              return (
+                <tr
+                  key={order.id}
+                  className={
+                    "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                    (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                  }
+                >
+                  <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
+                    {new Date(order.timestamp).toLocaleTimeString()}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">{order.orderId}</td>
+                  <td className="px-4 py-2">
+                    {order.retailer} / {order.carrier}
+                  </td>
+                  <td className="px-4 py-2">${order.totalPaidByAgent.toFixed(2)}</td>
+                  <td className="px-4 py-2">${order.totalChargedToUser.toFixed(2)}</td>
+                  <td className="px-4 py-2 font-medium text-emerald-600 dark:text-emerald-400">
+                    +${order.profit.toFixed(2)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Call log */}

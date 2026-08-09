@@ -5,6 +5,7 @@
  */
 import { NextResponse } from "next/server";
 import { getApiCallLog, getCallLogStats } from "@/backend/services/callLog";
+import { getOrderLog, getProfitStats } from "@/backend/services/orderLog";
 import { getRainConfig } from "@/backend/rain/client";
 import { getMonadConfig, getNetworkStatus } from "@/backend/monad/client";
 
@@ -28,6 +29,8 @@ export async function GET() {
     rainConfigured: isRainConfigured(),
     stats: getCallLogStats(),
     calls: getApiCallLog(),
+    profit: getProfitStats(),
+    orders: getOrderLog(),
     monad: {
       config: monadConfig,
       status: monadStatus,

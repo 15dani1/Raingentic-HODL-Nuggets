@@ -4,7 +4,7 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CheckoutResult, Product, QuantityMismatchPrompt } from "@/shared/types";
 
 interface ProductCardProps {
@@ -27,6 +27,18 @@ async function submitCheckout(
   return res.json();
 }
 
+// Narrates what the agent is doing in real time, purely for demo purposes —
+// these steps mirror the real backend flow in /api/checkout (arbitrage
+// search -> Monad spend-policy check -> Rain scoped card -> authorize ->
+// settle), staged with short delays so a human audience can follow along.
+const DEMO_STEPS = [
+  { label: "Searching every retailer & pack size...", ms: 500 },
+  { label: "Checking Monad testnet is live...", ms: 550 },
+  { label: "Issuing a scoped Rain card...", ms: 650 },
+  { label: "Authorizing the charge...", ms: 500 },
+  { label: "Settling the transaction...", ms: 500 },
+];
+
 export function ProductCard({ product }: ProductCardProps) {
   const [price, setPrice] = useState<number | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
@@ -34,6 +46,9 @@ export function ProductCard({ product }: ProductCardProps) {
   const [buying, setBuying] = useState(false);
   const [mismatch, setMismatch] = useState<QuantityMismatchPrompt | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [stepIndex, setStepIndex] = useState(-1);
+  const [order, setOrder] = useState<CheckoutResult | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,14 +67,32 @@ export function ProductCard({ product }: ProductCardProps) {
     };
   }, [product.id]);
 
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
+
+  /** Steps through DEMO_STEPS while the real checkout request runs in parallel. */
+  async function playDemoSteps() {
+    for (let i = 0; i < DEMO_STEPS.length; i++) {
+      if (cancelledRef.current) return;
+      setStepIndex(i);
+      await new Promise((resolve) => setTimeout(resolve, DEMO_STEPS[i].ms));
+    }
+  }
+
   async function handleBuy() {
     setBuying(true);
-    setStatus("Finding the best price...");
-    const result = await submitCheckout(product.id);
+    setOrder(null);
+    setStatus(null);
+    setStepIndex(0);
+
+    const [result] = await Promise.all([submitCheckout(product.id), playDemoSteps()]);
 
     if (result.status === "needs_confirmation" && result.quantityMismatch) {
       setMismatch(result.quantityMismatch);
-      setStatus(null);
+      setStepIndex(-1);
       setBuying(false);
       return;
     }
@@ -69,13 +102,19 @@ export function ProductCard({ product }: ProductCardProps) {
 
   async function respondToMismatch(accept: boolean) {
     setBuying(true);
-    setStatus(accept ? "Buying the pack..." : "Buying a single unit...");
-    const result = await submitCheckout(product.id, accept);
     setMismatch(null);
+    setStepIndex(0);
+
+    const [result] = await Promise.all([
+      submitCheckout(product.id, accept),
+      playDemoSteps(),
+    ]);
     finishOrder(result);
   }
 
   function finishOrder(result: CheckoutResult) {
+    setStepIndex(-1);
+    setOrder(result);
     setStatus(
       result.status === "confirmed"
         ? `Order confirmed! Arriving ${result.estimatedDelivery}.`
@@ -139,7 +178,36 @@ export function ProductCard({ product }: ProductCardProps) {
         </button>
       )}
 
+      {stepIndex >= 0 && (
+        <ul className="flex flex-col gap-1 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
+          {DEMO_STEPS.map((step, i) => (
+            <li
+              key={step.label}
+              className={
+                "flex items-center gap-2 transition-opacity " +
+                (i > stepIndex ? "opacity-30" : "opacity-100")
+              }
+            >
+              <span>
+                {i < stepIndex ? "✅" : i === stepIndex ? "⏳" : "◯"}
+              </span>
+              {step.label}
+            </li>
+          ))}
+        </ul>
+      )}
+
       {status && <p className="text-sm text-zinc-500">{status}</p>}
+
+      {order?.status === "confirmed" && (
+        <a
+          href="/dev"
+          className="text-xs font-medium text-emerald-600 underline underline-offset-2 hover:text-emerald-700 dark:text-emerald-400"
+        >
+          See this order&apos;s API calls on the dev dashboard →
+        </a>
+      )}
     </div>
   );
 }
+

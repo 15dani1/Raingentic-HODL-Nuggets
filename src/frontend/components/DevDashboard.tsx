@@ -37,7 +37,9 @@ interface DevMetrics {
   };
 }
 
-const REFRESH_MS = 4000;
+const REFRESH_MS = 2000;
+// Highlight any call recorded within this window as "new" during a live demo.
+const NEW_CALL_WINDOW_MS = 3000;
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
   return (
@@ -63,6 +65,12 @@ export function DevDashboard() {
   const [metrics, setMetrics] = useState<DevMetrics | null>(null);
   const [rows, setRows] = useState<DashboardRow[]>([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -212,8 +220,16 @@ export function DevDashboard() {
                 </td>
               </tr>
             )}
-            {(metrics?.calls ?? []).map((call) => (
-              <tr key={call.id} className="border-t border-zinc-100 dark:border-zinc-800">
+            {(metrics?.calls ?? []).map((call) => {
+              const isNew = now - new Date(call.timestamp).getTime() < NEW_CALL_WINDOW_MS;
+              return (
+                <tr
+                  key={call.id}
+                  className={
+                    "border-t border-zinc-100 transition-colors duration-1000 dark:border-zinc-800 " +
+                    (isNew ? "bg-emerald-50 dark:bg-emerald-950/40" : "")
+                  }
+                >
                 <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
                   {new Date(call.timestamp).toLocaleTimeString()}
                 </td>
@@ -248,7 +264,8 @@ export function DevDashboard() {
                 <td className="px-4 py-2 whitespace-nowrap">{call.durationMs}ms</td>
                 <td className="px-4 py-2 text-zinc-500">{call.error ?? call.summary ?? ""}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

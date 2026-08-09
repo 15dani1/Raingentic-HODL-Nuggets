@@ -20,6 +20,7 @@ import {
   checkQuantityMismatch,
   getCheapestOverallQuote,
   getCheapestSingleUnitQuote,
+  getMarginRate,
 } from "@/backend/services/arbitrageEngine";
 import { executePurchase, getRainConfig, issueScopedCard } from "@/backend/rain/client";
 import { checkSpendPolicy } from "@/backend/monad/client";
@@ -27,7 +28,6 @@ import { recordApiCall } from "@/backend/services/callLog";
 import { recordOrder } from "@/backend/services/orderLog";
 import type { CheckoutRequest, CheckoutResult, LandedCostQuote } from "@/shared/types";
 
-const MARGIN_RATE = 1.12;
 const DEFAULT_MCC = "5999"; // Miscellaneous and specialty retail stores
 
 function isRainConfigured(): boolean {
@@ -39,8 +39,12 @@ function isRainConfigured(): boolean {
   }
 }
 
-async function completeOrderViaRain(quote: LandedCostQuote): Promise<CheckoutResult> {
-  const totalChargedToUser = Math.round(quote.totalLandedCost * MARGIN_RATE * 100) / 100;
+async function completeOrderViaRain(
+  quote: LandedCostQuote,
+  maxDeliveryDays?: number,
+): Promise<CheckoutResult> {
+  const marginRate = getMarginRate(quote.totalLandedCost, maxDeliveryDays);
+  const totalChargedToUser = Math.round(quote.totalLandedCost * (1 + marginRate) * 100) / 100;
   const amountInUsdCents = Math.round(quote.totalLandedCost * 100);
 
   const card = await issueScopedCard(amountInUsdCents);
@@ -63,14 +67,15 @@ async function completeOrderViaRain(quote: LandedCostQuote): Promise<CheckoutRes
   };
 }
 
-function completeOrderSimulated(quote: LandedCostQuote): CheckoutResult {
+function completeOrderSimulated(quote: LandedCostQuote, maxDeliveryDays?: number): CheckoutResult {
+  const marginRate = getMarginRate(quote.totalLandedCost, maxDeliveryDays);
   return {
     orderId: `sim-${Date.now()}`,
     productId: quote.productId,
     retailer: quote.retailer,
     carrier: quote.carrier,
     totalPaidByAgent: quote.totalLandedCost,
-    totalChargedToUser: Math.round(quote.totalLandedCost * MARGIN_RATE * 100) / 100,
+    totalChargedToUser: Math.round(quote.totalLandedCost * (1 + marginRate) * 100) / 100,
     estimatedDelivery: quote.estimatedDelivery,
     status: "confirmed",
   };
@@ -119,8 +124,8 @@ export async function POST(req: NextRequest) {
     }
 
     const result = isRainConfigured()
-      ? await completeOrderViaRain(quote)
-      : completeOrderSimulated(quote);
+      ? await completeOrderViaRain(quote, maxDeliveryDays)
+      : completeOrderSimulated(quote, maxDeliveryDays);
     recordApiCall({
       source: "checkout",
       method: "POST",

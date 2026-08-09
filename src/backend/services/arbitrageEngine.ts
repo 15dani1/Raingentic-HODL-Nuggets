@@ -13,8 +13,45 @@ import type {
   QuantityMismatchPrompt,
 } from "@/shared/types";
 
-/** Default margin the agent takes on top of landed cost. */
-const DEFAULT_MARGIN_RATE = 0.12;
+/**
+ * Margin is no longer a flat 12% on every order. Instead it scales with
+ * the landed cost (thinner margin on pricier items, since a flat
+ * percentage there would price the agent out of "best available"
+ * territory) and gets a small additional discount the longer the user is
+ * willing to wait, since slower shipping is cheaper for the agent to
+ * fulfil and that savings should be passed on rather than pocketed
+ * entirely. A floor keeps every order profitable.
+ */
+const MIN_MARGIN_RATE = 0.03;
+const MAX_MARGIN_RATE = 0.18;
+const WAIT_DISCOUNT_DAYS_RANGE: [min: number, max: number] = [2, 10];
+const WAIT_DISCOUNT_MAX_RATE = 0.05;
+
+/** Landed-cost tiers: cheaper items can bear a higher percentage margin. */
+function baseMarginRate(totalLandedCost: number): number {
+  if (totalLandedCost < 20) return 0.18;
+  if (totalLandedCost < 100) return 0.12;
+  if (totalLandedCost < 300) return 0.08;
+  return 0.05;
+}
+
+/**
+ * Computes the margin rate to apply for a given landed cost and
+ * how many days the user is willing to wait for delivery. Always
+ * returns at least MIN_MARGIN_RATE so every order stays profitable.
+ */
+export function getMarginRate(totalLandedCost: number, maxDeliveryDays?: number): number {
+  let rate = baseMarginRate(totalLandedCost);
+
+  if (maxDeliveryDays !== undefined) {
+    const [minDays, maxDays] = WAIT_DISCOUNT_DAYS_RANGE;
+    const clamped = Math.min(Math.max(maxDeliveryDays, minDays), maxDays);
+    const waitFraction = (clamped - minDays) / (maxDays - minDays);
+    rate -= waitFraction * WAIT_DISCOUNT_MAX_RATE;
+  }
+
+  return Math.min(Math.max(rate, MIN_MARGIN_RATE), MAX_MARGIN_RATE);
+}
 
 /** All landed-cost quotes across every retailer/carrier combo, including multi-packs. */
 export function getAllLandedCostQuotes(productId: string): LandedCostQuote[] {
@@ -124,19 +161,24 @@ export function checkQuantityMismatch(
  * Computes the single marketplace price (landed cost + margin) shown to
  * users on initial page load, based on single-unit-fitting listings only.
  * `maxDeliveryDays`, if provided, lets the user accept a slower delivery
- * window in exchange for a potentially lower price.
+ * window in exchange for a potentially lower price. `marginRate`, if
+ * provided, overrides the dynamic per-order margin rate (mainly useful
+ * for tests) — otherwise the rate is computed by `getMarginRate` based on
+ * landed cost and delivery window, rather than a flat percentage.
  */
 export function getMarketplacePrice(
   productId: string,
-  marginRate: number = DEFAULT_MARGIN_RATE,
+  marginRate?: number,
   maxDeliveryDays?: number,
 ): MarketplacePrice | null {
   const cheapest = getCheapestSingleUnitQuote(productId, 1, maxDeliveryDays);
   if (!cheapest) return null;
 
+  const rate = marginRate ?? getMarginRate(cheapest.totalLandedCost, maxDeliveryDays);
+
   return {
     productId,
-    price: Math.round(cheapest.totalLandedCost * (1 + marginRate) * 100) / 100,
+    price: Math.round(cheapest.totalLandedCost * (1 + rate) * 100) / 100,
     estimatedDelivery: cheapest.estimatedDelivery,
   };
 }

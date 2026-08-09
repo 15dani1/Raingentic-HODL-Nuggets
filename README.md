@@ -1,6 +1,6 @@
-# Raingentic-HODL-Nuggets
+# RainBox
 
-Welcome to the Raingentic-HODL-Nuggets repository!
+Welcome to the RainBox repository!
 
 ## What is this?
 

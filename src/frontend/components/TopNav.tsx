@@ -23,7 +23,7 @@ export function TopNav() {
     <header className="sticky top-0 z-10 border-b border-zinc-200 bg-background/80 backdrop-blur dark:border-zinc-800">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3">
         <Link href="/" className="font-semibold tracking-tight">
-          Raingentic HODL Nuggets
+          RainBox
         </Link>
         <nav className="flex gap-1">
           {LINKS.map((link) => {

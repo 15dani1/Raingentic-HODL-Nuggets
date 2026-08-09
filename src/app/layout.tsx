@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Raingentic HODL Nuggets",
+  title: "RainBox",
   description: "AI shopping arbitrage agent marketplace",
 };
 
